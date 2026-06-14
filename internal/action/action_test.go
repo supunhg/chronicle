@@ -19,18 +19,49 @@ import (
 // (or no player) set w.PlayerID directly. Phase 18: the
 // world's item catalog (w.Items) is populated with the
 // Phase 17.6 default goods so the action engine's buy/sell
-// handlers have a catalog to look up.
+// handlers have a catalog to look up. Phase 19: a merchant
+// ("baker") is added at the player's location (blackwater)
+// with a full stock of the catalog, so the action engine's
+// buy/sell handlers have a merchant to trade with. Tests
+// that need a no-merchant scenario set w.PlayerID to a
+// location that has no merchant, or delete the merchant
+// directly.
 func newTestWorld() *core.World {
 	w := core.NewWorld("test", 1, time.Date(1400, 1, 1, 0, 0, 0, 0, time.UTC))
 	w.AddLocation(&core.Location{ID: "blackwater", Name: "Blackwater", PopulationCap: 100})
 	w.AddLocation(&core.Location{ID: "ashford", Name: "Ashford", PopulationCap: 50})
 	w.AddPerson(&core.Person{ID: "alice", Name: "Alice", Alive: true, Gender: "F", BirthTick: -20 * 365, LocationID: "blackwater"})
 	w.AddPerson(&core.Person{ID: "bob", Name: "Bob", Alive: true, Gender: "M", BirthTick: -30 * 365, LocationID: "ashford"})
+	w.Items = defaultTestCatalog()
+	w.AddPerson(&core.Person{
+		ID: "baker", Name: "Baker Tom", Alive: true, Gender: "M",
+		BirthTick: -30 * 365, LocationID: "blackwater", Occupation: "merchant",
+		IsMerchant: true,
+		Inventory:  defaultMerchantStock(w.Items, 10),
+	})
 	w.PlayerID = "alice"
 	w.Tick = 100
-	w.Items = defaultTestCatalog()
 	w.RecomputeLocationPopulations()
 	return w
+}
+
+// defaultMerchantStock seeds a merchant's inventory with a
+// fixed starting count of each catalog item, copying the
+// metadata (Weight, Value, MaxDurability) from the catalog.
+// Phase 19: mirrors the worldpack.Bootstrap behavior for
+// is_merchant occupations.
+func defaultMerchantStock(catalog map[string]core.Item, count int) map[string]core.Item {
+	out := make(map[string]core.Item, len(catalog))
+	for name, item := range catalog {
+		out[name] = core.Item{
+			Name:          name,
+			Count:         count,
+			Weight:        item.Weight,
+			Value:         item.Value,
+			MaxDurability: item.MaxDurability,
+		}
+	}
+	return out
 }
 
 // defaultTestCatalog returns a minimal Phase 18 item catalog
@@ -806,6 +837,195 @@ func TestResolve_BranchSwitchRoundTrip(t *testing.T) {
 	}
 	if len(w.Memories) != 0 {
 		t.Errorf("Memories count = %d after round-trip, want 0", len(w.Memories))
+	}
+}
+
+// TestFindMerchantAt_FirstBySortedID verifies that
+// findMerchantAt returns the merchant with the lowest
+// sorted ID when multiple merchants are at the same
+// location. Phase 19 v1: the player can't address a
+// specific merchant; the first by ID wins.
+func TestFindMerchantAt_FirstBySortedID(t *testing.T) {
+	w := newTestWorld()
+	w.Items = defaultTestCatalog()
+	// Remove the default baker; add two merchants, both
+	// at blackwater.
+	delete(w.People, "baker")
+	w.AddPerson(&core.Person{
+		ID: "zara", Name: "Zara", Alive: true, Gender: "F",
+		BirthTick: -25 * 365, LocationID: "blackwater", Occupation: "merchant",
+		IsMerchant: true,
+		Inventory:  defaultMerchantStock(w.Items, 5),
+	})
+	w.AddPerson(&core.Person{
+		ID: "adam", Name: "Adam", Alive: true, Gender: "M",
+		BirthTick: -25 * 365, LocationID: "blackwater", Occupation: "merchant",
+		IsMerchant: true,
+		Inventory:  defaultMerchantStock(w.Items, 5),
+	})
+	eng := New(w, nil)
+	// Sorted IDs: adam, zara → adam should win.
+	got := eng.findMerchantAt("blackwater")
+	if got == nil || got.ID != "adam" {
+		t.Errorf("findMerchantAt at blackwater = %v, want adam", got)
+	}
+}
+
+// TestFindMerchantAt_NoMerchant verifies that
+// findMerchantAt returns nil when no merchant is at the
+// location.
+func TestFindMerchantAt_NoMerchant(t *testing.T) {
+	w := newTestWorld()
+	// Remove the merchant entirely.
+	delete(w.People, "baker")
+	eng := New(w, nil)
+	if got := eng.findMerchantAt("blackwater"); got != nil {
+		t.Errorf("findMerchantAt at blackwater with no merchant = %v, want nil", got)
+	}
+	if got := eng.findMerchantAt(""); got != nil {
+		t.Errorf("findMerchantAt at empty location = %v, want nil", got)
+	}
+}
+
+// TestFindMerchantAt_DeadMerchant verifies that a dead
+// merchant is not found (Alive=false excludes them).
+func TestFindMerchantAt_DeadMerchant(t *testing.T) {
+	w := newTestWorld()
+	w.People["baker"].Alive = false
+	eng := New(w, nil)
+	if got := eng.findMerchantAt("blackwater"); got != nil {
+		t.Errorf("findMerchantAt with dead merchant = %v, want nil", got)
+	}
+}
+
+// TestFindMerchantAt_OtherLocation verifies that a
+// merchant at a different location is not found.
+func TestFindMerchantAt_OtherLocation(t *testing.T) {
+	w := newTestWorld()
+	w.People["baker"].LocationID = "ashford"
+	eng := New(w, nil)
+	if got := eng.findMerchantAt("blackwater"); got != nil {
+		t.Errorf("findMerchantAt at blackwater with merchant at ashford = %v, want nil", got)
+	}
+}
+
+// TestResolve_Buy_NoMerchantAtLocation verifies that buy
+// is rejected when no merchant is at the player's
+// location.
+func TestResolve_Buy_NoMerchantAtLocation(t *testing.T) {
+	w := newTestWorld()
+	// Move the merchant away from the player's location.
+	w.People["baker"].LocationID = "ashford"
+	w.Coin = 100
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionBuy, Target: "bread"})
+	if res.OK {
+		t.Errorf("buy with no merchant at location: OK = true, want false; Text = %q", res.Text)
+	}
+	if !strings.Contains(res.Text, "no merchant") {
+		t.Errorf("buy no-merchant output missing 'no merchant': %q", res.Text)
+	}
+	// Player's coin should be unchanged.
+	if w.Coin != 100 {
+		t.Errorf("Coin = %d after rejected buy, want 100", w.Coin)
+	}
+}
+
+// TestResolve_Buy_DepletesMerchantStock verifies that
+// buying from a merchant decreases the merchant's stock.
+func TestResolve_Buy_DepletesMerchantStock(t *testing.T) {
+	w := newTestWorld()
+	w.Coin = 100
+	startStock := w.People["baker"].Inventory["bread"].Count
+	eng := New(w, nil)
+	_, _ = eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionBuy, Target: "bread", Args: intent.Args{Quantity: 3}})
+	if got := w.People["baker"].Inventory["bread"].Count; got != startStock-3 {
+		t.Errorf("merchant bread stock = %d after buying 3, want %d", got, startStock-3)
+	}
+}
+
+// TestResolve_Buy_OutOfStock verifies that buy is rejected
+// when the merchant has insufficient stock.
+func TestResolve_Buy_OutOfStock(t *testing.T) {
+	w := newTestWorld()
+	w.Coin = 10000
+	// Drain the merchant's bread to 1.
+	w.People["baker"].Inventory["bread"] = core.Item{Name: "bread", Count: 1, Weight: 0.5, Value: 3}
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionBuy, Target: "bread", Args: intent.Args{Quantity: 5}})
+	if res.OK {
+		t.Errorf("buy 5 bread from 1-stock merchant: OK = true, want false")
+	}
+	if !strings.Contains(res.Text, "only") {
+		t.Errorf("buy out-of-stock output missing 'only': %q", res.Text)
+	}
+}
+
+// TestResolve_Buy_DepletesToZeroAndRemoves verifies that
+// when the merchant's stock drops to 0, the entry is
+// removed (consistent with the player's inventory on
+// sell).
+func TestResolve_Buy_DepletesToZeroAndRemoves(t *testing.T) {
+	w := newTestWorld()
+	w.Coin = 100
+	// Set merchant bread stock to 2.
+	w.People["baker"].Inventory["bread"] = core.Item{Name: "bread", Count: 2, Weight: 0.5, Value: 3}
+	eng := New(w, nil)
+	_, _ = eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionBuy, Target: "bread", Args: intent.Args{Quantity: 2}})
+	if _, exists := w.People["baker"].Inventory["bread"]; exists {
+		t.Errorf("merchant bread still in inventory after draining to 0")
+	}
+}
+
+// TestResolve_Sell_NoMerchantAtLocation verifies that
+// sell is rejected when no merchant is at the player's
+// location.
+func TestResolve_Sell_NoMerchantAtLocation(t *testing.T) {
+	w := newTestWorld()
+	w.People["baker"].LocationID = "ashford"
+	w.Inventory["bread"] = core.Item{Name: "bread", Count: 3, Weight: 0.5, Value: 3}
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSell, Target: "bread"})
+	if res.OK {
+		t.Errorf("sell with no merchant at location: OK = true, want false; Text = %q", res.Text)
+	}
+	if !strings.Contains(res.Text, "no merchant") {
+		t.Errorf("sell no-merchant output missing 'no merchant': %q", res.Text)
+	}
+}
+
+// TestResolve_Sell_IncreasesMerchantStock verifies that
+// selling to a merchant increases the merchant's stock.
+func TestResolve_Sell_IncreasesMerchantStock(t *testing.T) {
+	w := newTestWorld()
+	w.Inventory["bread"] = core.Item{Name: "bread", Count: 5, Weight: 0.5, Value: 3}
+	startStock := w.People["baker"].Inventory["bread"].Count
+	eng := New(w, nil)
+	_, _ = eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSell, Target: "bread", Args: intent.Args{Quantity: 2}})
+	if got := w.People["baker"].Inventory["bread"].Count; got != startStock+2 {
+		t.Errorf("merchant bread stock = %d after selling 2, want %d", got, startStock+2)
+	}
+}
+
+// TestResolve_Sell_CreatesMerchantEntryFromZero verifies
+// that selling an item the merchant doesn't carry creates
+// a new merchant entry.
+func TestResolve_Sell_CreatesMerchantEntryFromZero(t *testing.T) {
+	w := newTestWorld()
+	// Merchant has no potion in stock.
+	delete(w.People["baker"].Inventory, "potion")
+	w.Inventory["potion"] = core.Item{Name: "potion", Count: 2, Weight: 0.3, Value: 20}
+	eng := New(w, nil)
+	_, _ = eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSell, Target: "potion", Args: intent.Args{Quantity: 1}})
+	stack, ok := w.People["baker"].Inventory["potion"]
+	if !ok {
+		t.Fatalf("merchant did not get potion entry after sell")
+	}
+	if stack.Count != 1 {
+		t.Errorf("merchant potion count = %d, want 1", stack.Count)
+	}
+	if stack.Value != 20 {
+		t.Errorf("merchant potion Value = %d, want 20 (from catalog)", stack.Value)
 	}
 }
 

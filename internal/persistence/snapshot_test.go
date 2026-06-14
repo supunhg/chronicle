@@ -732,6 +732,125 @@ func TestSnapshot_NoMemories(t *testing.T) {
 	}
 }
 
+// TestSnapshot_PerPersonInventoryRoundTrip verifies that
+// every Person's Inventory survives a Snapshot/Restore
+// cycle. Phase 19 promotes the inventory from player-only
+// to per-person (each NPC has their own). The merchant's
+// stock and the player's inventory are both written/read
+// independently. This is the persistence-package boundary
+// test for the per-person inventory feature.
+func TestSnapshot_PerPersonInventoryRoundTrip(t *testing.T) {
+	db := newTestDB(t)
+	w := core.NewWorld("ppi-rt", 1, time.Date(1400, 1, 1, 0, 0, 0, 0, time.UTC))
+	w.AddLocation(&core.Location{ID: "blackwater", Name: "Blackwater", PopulationCap: 100})
+	w.PlayerID = "alice"
+	w.AddPerson(&core.Person{
+		ID: "alice", Name: "Alice", Alive: true, Gender: "F",
+		BirthTick: -20 * 365, LocationID: "blackwater",
+	})
+	// Phase 19: the player's inventory is stored at the world
+	// level (w.Inventory) — the canonical field used by the
+	// action engine. Per-person inventory (Person.Inventory) is
+	// the storage for non-player NPCs (merchants, etc.).
+	w.Inventory["bread"] = core.Item{Name: "bread", Count: 3, Weight: 0.5, Value: 3}
+	w.Inventory["sword"] = core.Item{Name: "sword", Count: 1, Weight: 4.0, Value: 50, MaxDurability: 1.0}
+	w.AddPerson(&core.Person{
+		ID: "baker", Name: "Baker", Alive: true, Gender: "M",
+		BirthTick: -30 * 365, LocationID: "blackwater", Occupation: "merchant",
+		IsMerchant: true,
+		Inventory: map[string]core.Item{
+			"bread":  {Name: "bread", Count: 7, Weight: 0.5, Value: 3},
+			"ale":    {Name: "ale", Count: 4, Weight: 1.0, Value: 2},
+			"potion": {Name: "potion", Count: 0, Weight: 0.3, Value: 20},
+		},
+	})
+	if err := db.Snapshot(w); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	loaded := core.NewWorld("", 0, time.Time{})
+	loaded.PlayerID = "alice"
+	if err := db.Restore(loaded); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	// Player's inventory round-trips.
+	if loaded.Inventory["bread"].Count != 3 {
+		t.Errorf("player Inventory[bread].Count = %d, want 3", loaded.Inventory["bread"].Count)
+	}
+	if loaded.Inventory["sword"].Count != 1 {
+		t.Errorf("player Inventory[sword].Count = %d, want 1", loaded.Inventory["sword"].Count)
+	}
+	// Merchant's inventory round-trips independently.
+	baker, ok := loaded.People["baker"]
+	if !ok {
+		t.Fatalf("merchant baker not restored")
+	}
+	if baker.Inventory["bread"].Count != 7 {
+		t.Errorf("merchant Inventory[bread].Count = %d, want 7", baker.Inventory["bread"].Count)
+	}
+	if baker.Inventory["ale"].Count != 4 {
+		t.Errorf("merchant Inventory[ale].Count = %d, want 4", baker.Inventory["ale"].Count)
+	}
+}
+
+// TestSnapshot_PerPersonInventory_NoDoubleWrite verifies
+// that writeAllInventories does not write the player's
+// inventory twice (once via the player path and once via
+// the NPC path). The test inspects the row count in the
+// inventory table after a single Snapshot.
+func TestSnapshot_PerPersonInventory_NoDoubleWrite(t *testing.T) {
+	db := newTestDB(t)
+	w := core.NewWorld("ppi-ndw", 1, time.Date(1400, 1, 1, 0, 0, 0, 0, time.UTC))
+	w.AddLocation(&core.Location{ID: "blackwater", Name: "Blackwater", PopulationCap: 100})
+	w.PlayerID = "alice"
+	w.AddPerson(&core.Person{
+		ID: "alice", Name: "Alice", Alive: true, Gender: "F",
+		BirthTick: -20 * 365, LocationID: "blackwater",
+	})
+	// Player inventory lives at the world level (w.Inventory),
+	// not on the Person record. See TestSnapshot_PerPersonInventoryRoundTrip.
+	w.Inventory["bread"] = core.Item{Name: "bread", Count: 2, Weight: 0.5, Value: 3}
+	if err := db.Snapshot(w); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	var rowCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM inventory WHERE person_id = 'alice' AND resource = 'bread'").Scan(&rowCount); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if rowCount != 1 {
+		t.Errorf("inventory rows for alice/bread = %d, want 1 (no double-write)", rowCount)
+	}
+}
+
+// TestSnapshot_PerPersonInventory_NPCWithNoRows verifies
+// that an NPC with a nil Inventory (the v1/v2 default for
+// non-merchant NPCs) gets a non-nil empty Inventory after
+// Restore. The action engine's resolveBuy/resolveSell
+// assumes Inventory is non-nil for any Person, so the
+// restore must initialize it.
+func TestSnapshot_PerPersonInventory_NPCWithNoRows(t *testing.T) {
+	db := newTestDB(t)
+	w := core.NewWorld("ppi-nil", 1, time.Date(1400, 1, 1, 0, 0, 0, 0, time.UTC))
+	w.AddLocation(&core.Location{ID: "blackwater", Name: "Blackwater", PopulationCap: 100})
+	w.PlayerID = "alice"
+	w.AddPerson(&core.Person{ID: "alice", Name: "Alice", Alive: true, Gender: "F", BirthTick: -20 * 365, LocationID: "blackwater"})
+	w.AddPerson(&core.Person{ID: "bob", Name: "Bob", Alive: true, Gender: "M", BirthTick: -30 * 365, LocationID: "blackwater"})
+	// Both alice and bob have nil Inventory at snapshot time.
+	if err := db.Snapshot(w); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	loaded := core.NewWorld("", 0, time.Time{})
+	loaded.PlayerID = "alice"
+	if err := db.Restore(loaded); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if loaded.People["bob"].Inventory == nil {
+		t.Errorf("bob's Inventory is nil after Restore, want non-nil empty map")
+	}
+	if len(loaded.People["bob"].Inventory) != 0 {
+		t.Errorf("bob's Inventory has %d entries, want 0", len(loaded.People["bob"].Inventory))
+	}
+}
+
 // TestSnapshot_CoinRoundTrip verifies that w.Coin survives
 // a Snapshot/Restore cycle. Phase 17.6 added Coin to core.World;
 // Phase 17.7 (branch/switch) needs it to round-trip so a switch

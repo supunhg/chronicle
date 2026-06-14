@@ -94,6 +94,36 @@ func Bootstrap(pack *Pack, w *core.World, seed int64) error {
 		w.AddPerson(p)
 	}
 
+	// 6.5 Seed merchant inventories. Phase 19: any Person whose
+	// occupation has is_merchant=true gets an Inventory seeded
+	// from the worldpack's item catalog. The starting count
+	// defaults to 10 per item (or whatever merchant_starting_stock
+	// says). The action engine's resolveBuy decrements the
+	// merchant's Count; resolveSell increments it.
+	for _, p := range w.People {
+		if !p.IsMerchant {
+			continue
+		}
+		occSpec, ok := occByID[p.Occupation]
+		if !ok {
+			continue
+		}
+		stock := occSpec.MerchantStartingStock
+		if stock <= 0 {
+			stock = 10
+		}
+		p.Inventory = make(map[string]core.Item, len(w.Items))
+		for itemName, catalog := range w.Items {
+			p.Inventory[itemName] = core.Item{
+				Name:          itemName,
+				Count:         stock,
+				Weight:        catalog.Weight,
+				Value:         catalog.Value,
+				MaxDurability: catalog.MaxDurability,
+			}
+		}
+	}
+
 	// 7. Recompute populations (Location.Population is derived state)
 	w.RecomputeLocationPopulations()
 
@@ -248,6 +278,14 @@ func generatePerson(
 		}
 	}
 
+	// Merchant flag (Phase 19). Set from the occupation spec
+	// so the action engine can identify this person as a
+	// merchant at the player's location.
+	isMerchant := false
+	if occ, ok := occByID[occupation]; ok {
+		isMerchant = occ.IsMerchant
+	}
+
 	return &core.Person{
 		ID:         fmt.Sprintf("n%04d", idx),
 		Name:       name,
@@ -257,6 +295,7 @@ func generatePerson(
 		LocationID: s.LocationID,
 		Class:      class,
 		Occupation: occupation,
+		IsMerchant: isMerchant,
 		Traits:     traits,
 		Needs:      needs,
 	}

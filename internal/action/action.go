@@ -354,12 +354,16 @@ func (e *Engine) resolveSave(path string) Result {
 // to the player's inventory and deducts Coin. Phase 18 reads
 // the per-item price from the worldpack's item catalog
 // (w.Items) instead of the Phase 17.6 hardcoded priceList.
+// Phase 19 requires a merchant at the player's same location
+// and decrements the merchant's stock.
 //
 // Quantity defaults to 1 when 0 or negative. The buy is
-// rejected if the player can't afford it or the item is
-// unknown. The buy copies the catalog's Weight, Value, and
-// MaxDurability into the inventory stack so a switch back to
-// a pre-buy world preserves the metadata at acquisition time.
+// rejected if the player can't afford it, no merchant is at
+// the same location, the merchant is out of stock, or the
+// item is unknown. The buy copies the catalog's Weight,
+// Value, and MaxDurability into the inventory stack so a
+// switch back to a pre-buy world preserves the metadata at
+// acquisition time.
 func (e *Engine) resolveBuy(item string, quantity int) Result {
 	if item == "" {
 		return Result{OK: false, Text: "Buy what?"}
@@ -376,14 +380,30 @@ func (e *Engine) resolveBuy(item string, quantity int) Result {
 	if !ok {
 		return Result{OK: false, Text: fmt.Sprintf("I don't know the price of %q.", item)}
 	}
+	// Phase 19: find a merchant at the same location.
+	merchant := e.findMerchantAt(player.LocationID)
+	if merchant == nil {
+		return Result{OK: false, Text: fmt.Sprintf("There is no merchant here to sell you %s.", item)}
+	}
+	// Check the merchant's stock. The merchant's Inventory
+	// is their stock-on-hand.
+	stock, ok := merchant.Inventory[key]
+	if !ok || stock.Count < quantity {
+		have := 0
+		if ok {
+			have = stock.Count
+		}
+		return Result{OK: false, Text: fmt.Sprintf("%s has only %d %s; can't sell you %d.", merchant.Name, have, item, quantity)}
+	}
 	cost := catalog.Value * quantity
 	if e.world.Coin < cost {
 		return Result{OK: false, Text: fmt.Sprintf("You can't afford %d %s (%d coin); you only have %d.", quantity, item, cost, e.world.Coin)}
 	}
 	e.world.Coin -= cost
-	// Add to inventory, creating or updating the stack. The
-	// stack's metadata (Weight, Value, MaxDurability) is
-	// copied from the catalog at acquisition time.
+	// Add to player's inventory, creating or updating the
+	// stack. The stack's metadata (Weight, Value,
+	// MaxDurability) is copied from the catalog at
+	// acquisition time.
 	stack := e.world.Inventory[key]
 	stack.Name = key
 	stack.Count += quantity
@@ -391,14 +411,27 @@ func (e *Engine) resolveBuy(item string, quantity int) Result {
 	stack.Value = catalog.Value
 	stack.MaxDurability = catalog.MaxDurability
 	e.world.Inventory[key] = stack
-	return Result{OK: true, Text: fmt.Sprintf("You buy %d %s for %d coin. (Coin: %d)", quantity, item, cost, e.world.Coin)}
+	// Decrement the merchant's stock. If the count drops to
+	// 0, the entry is removed (consistent with the player's
+	// inventory handling on sell).
+	stock.Count -= quantity
+	if stock.Count <= 0 {
+		delete(merchant.Inventory, key)
+	} else {
+		merchant.Inventory[key] = stock
+	}
+	return Result{OK: true, Text: fmt.Sprintf("You buy %d %s from %s for %d coin. (Coin: %d)", quantity, item, merchant.Name, cost, e.world.Coin)}
 }
 
 // resolveSell handles "sell <item> [quantity]" — removes
 // items from the player's inventory and adds Coin. Phase 18
 // reads the per-item price from the worldpack's item catalog
-// (w.Items). The sell is rejected if the player doesn't have
-// the item (or enough of it), or if the item is unknown.
+// (w.Items). Phase 19 requires a merchant at the player's
+// same location and increments the merchant's stock.
+//
+// The sell is rejected if the player doesn't have the item
+// (or enough of it), if no merchant is at the same location,
+// or if the item is unknown.
 func (e *Engine) resolveSell(item string, quantity int) Result {
 	if item == "" {
 		return Result{OK: false, Text: "Sell what?"}
@@ -414,6 +447,11 @@ func (e *Engine) resolveSell(item string, quantity int) Result {
 	catalog, ok := e.world.Items[key]
 	if !ok {
 		return Result{OK: false, Text: fmt.Sprintf("I don't know the price of %q.", item)}
+	}
+	// Phase 19: find a merchant at the same location.
+	merchant := e.findMerchantAt(player.LocationID)
+	if merchant == nil {
+		return Result{OK: false, Text: fmt.Sprintf("There is no merchant here to buy %s.", item)}
 	}
 	stack, ok := e.world.Inventory[key]
 	if !ok || stack.Count < quantity {
@@ -431,7 +469,17 @@ func (e *Engine) resolveSell(item string, quantity int) Result {
 	} else {
 		e.world.Inventory[key] = stack
 	}
-	return Result{OK: true, Text: fmt.Sprintf("You sell %d %s for %d coin. (Coin: %d)", quantity, item, value, e.world.Coin)}
+	// Increment the merchant's stock. Create the entry if
+	// the merchant didn't have this item before (e.g., a
+	// merchant who only sold swords now has bread).
+	mstock := merchant.Inventory[key]
+	mstock.Name = key
+	mstock.Count += quantity
+	mstock.Weight = catalog.Weight
+	mstock.Value = catalog.Value
+	mstock.MaxDurability = catalog.MaxDurability
+	merchant.Inventory[key] = mstock
+	return Result{OK: true, Text: fmt.Sprintf("You sell %d %s to %s for %d coin. (Coin: %d)", quantity, item, merchant.Name, value, e.world.Coin)}
 }
 
 // resolveBranch handles "branch <name>" — saves the current
@@ -626,6 +674,28 @@ func (e *Engine) findPerson(target string) *core.Person {
 		}
 	}
 	return nil
+}
+
+// findMerchantAt returns the first living merchant at the
+// given location, or nil if no merchant is present. Phase
+// 19: a merchant is a Person with IsMerchant=true. Used by
+// resolveBuy/resolveSell to enforce the same-location rule.
+// When multiple merchants are at the same location, the
+// first by sorted ID wins (deterministic for reproducible
+// tests). Phase 20+ may add a way to address a specific
+// merchant.
+func (e *Engine) findMerchantAt(locationID string) *core.Person {
+	var ids []string
+	for id, p := range e.world.People {
+		if p.Alive && p.IsMerchant && p.LocationID == locationID {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	sort.Strings(ids)
+	return e.world.People[ids[0]]
 }
 
 // findLocation looks up a location by exact ID first, then

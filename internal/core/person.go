@@ -10,6 +10,17 @@ package core
 //   - FatherID, MotherID, SpouseID for family trees
 //   - Traits, Needs, Goals for the GoalEngine (stubs in Phase 2)
 //
+// Phase 19 added:
+//   - Inventory: each NPC's carried items, keyed by canonical
+//     lowercase item name. For non-merchants this is what they
+//     happen to be carrying. For merchants it is their stock
+//     (Buy decrements, Sell increments).
+//   - IsMerchant: true if this NPC is a merchant. Buy/sell
+//     handlers in the action engine look for a merchant at the
+//     player's location; IsMerchant is the marker. Set by
+//     worldpack.Bootstrap based on the occupation's
+//     `is_merchant` flag.
+//
 // Age is derived: use Person.AgeAt(currentTick).
 type Person struct {
 	// Identity
@@ -27,6 +38,14 @@ type Person struct {
 	Class      string // Lower, Middle, Upper
 	Occupation string
 
+	// Merchant (Phase 19). When IsMerchant is true, Inventory
+	// serves as the merchant's stock: the action engine's
+	// resolveBuy decrements the merchant's Count, and resolveSell
+	// increments it. Non-merchants have IsMerchant=false and an
+	// Inventory that is just whatever they're carrying (currently
+	// a stub — no NPC self-consumes in Phase 19).
+	IsMerchant bool
+
 	// Family
 	FatherID string
 	MotherID string
@@ -40,6 +59,20 @@ type Person struct {
 
 	// Long-term goals (GoalEngine input)
 	Goals []string // e.g. ["become_noble", "find_spouse"]
+
+	// Inventory is the person's carried items, keyed by
+	// canonical lowercase item name. Phase 19: every person
+	// has their own inventory (not just the player). The
+	// value is a full core.Item (Name, Count, Weight, Value,
+	// MaxDurability) — the same struct used for the world's
+	// item catalog and the player's inventory. The metadata
+	// is copied from the catalog at acquisition time so a
+	// switch back to a pre-buy world still preserves the
+	// snapshot of the items' properties at the time they
+	// were acquired. For merchants, this map doubles as
+	// stock-on-hand: the action engine's resolveBuy/resolveSell
+	// increment and decrement the Count directly.
+	Inventory map[string]Item
 }
 
 // AgeAt returns the person's age in years at the given tick.

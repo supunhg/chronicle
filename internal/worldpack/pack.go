@@ -105,6 +105,21 @@ type OccupationSpec struct {
 	BaseWealth   int                `yaml:"base_wealth"`
 	SocialClass  string             `yaml:"social_class"`
 	Locations    []string           `yaml:"locations"`
+
+	// IsMerchant marks this occupation as a merchant. Phase 19:
+	// Bootstrap sets Person.IsMerchant=true for everyone in this
+	// occupation, and seeds their Inventory from the world's item
+	// catalog (default 10 of each item). The action engine's
+	// resolveBuy/resolveSell only operate when a merchant is
+	// at the same location as the player.
+	IsMerchant bool `yaml:"is_merchant"`
+
+	// MerchantStartingStock is the per-item starting count for
+	// merchants in this occupation. Phase 19: defaults to 10 of
+	// each catalog item when omitted. A worldpack can set this
+	// to e.g. 25 for a well-stocked general store, or 3 for a
+	// traveling peddler with limited goods.
+	MerchantStartingStock int `yaml:"merchant_starting_stock"`
 }
 
 // ActionRuleSpec is one contextual action rule in actions.yaml.

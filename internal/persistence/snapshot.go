@@ -59,14 +59,11 @@ func (db *DB) Snapshot(w *core.World) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM memories"); err != nil {
 		return fmt.Errorf("persistence: delete memories: %w", err)
 	}
-	// Clear the player's inventory rows (only the player's, in case
-	// a future phase adds per-NPC inventories with a different
-	// person_id). A world with no PlayerID skips this.
-	if w.PlayerID != "" {
-		if _, err := tx.ExecContext(ctx,
-			"DELETE FROM inventory WHERE person_id = ?", w.PlayerID); err != nil {
-			return fmt.Errorf("persistence: delete inventory: %w", err)
-		}
+	// Phase 19: clear ALL inventory rows (per-person, scoped by
+	// person_id). Pre-Phase 19 the player was the only person with
+	// an inventory, so this is a superset of the previous behavior.
+	if _, err := tx.ExecContext(ctx, "DELETE FROM inventory"); err != nil {
+		return fmt.Errorf("persistence: delete inventory: %w", err)
 	}
 	if err := writeMeta(ctx, tx, w); err != nil {
 		return err
@@ -89,7 +86,10 @@ func (db *DB) Snapshot(w *core.World) error {
 			return err
 		}
 	}
-	if err := writeInventory(ctx, tx, w); err != nil {
+	// Phase 19: write inventory rows for every Person who has a
+	// non-nil Inventory. The player's inventory (w.Inventory) is
+	// written first; then every NPC with a non-nil Inventory.
+	if err := writeAllInventories(ctx, tx, w); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -142,17 +142,15 @@ func (db *DB) Restore(w *core.World) error {
 	}
 	w.Memories = mems
 
-	// Inventory is scoped to the player (if any). A world with no
-	// PlayerID leaves w.Inventory as-is (it stays nil or whatever
-	// the caller set). Phase 18: reads the full core.Item
-	// metadata (Weight, Value, MaxDurability) from the inventory
-	// table.
-	inv, err := readInventory(db, w.PlayerID)
-	if err != nil {
+	// Phase 19: inventory is per-person, keyed by person_id.
+	// The player's inventory (w.PlayerID, if set) goes into
+	// w.Inventory; every other Person with a non-nil
+	// inventory gets their rows loaded into p.Inventory.
+	// Persons with no inventory rows keep a non-nil empty
+	// map (so the action engine's resolveBuy/resolveSell
+	// can append without nil checks).
+	if err := readAllInventories(db, w); err != nil {
 		return err
-	}
-	if w.PlayerID != "" {
-		w.Inventory = inv
 	}
 	return nil
 }
@@ -549,40 +547,40 @@ func decodeTags(s sql.NullString) []string {
 	return out
 }
 
-// writeInventory writes the player's inventory rows to the inventory
-// table, scoped by PlayerID. A no-op if PlayerID is empty (world-
-// level mode) — there is no per-person inventory yet for that case.
+// writeInventory writes a single person's inventory rows to
+// the inventory table, scoped by personID. A no-op if inv is
+// nil (no inventory to write). Phase 19: called for the
+// player (w.Inventory) and for every NPC with a non-nil
+// Inventory, so each person's stock round-trips separately.
 //
-// Phase 18: each row now stores the full core.Item metadata
-// (weight, value, max_durability) in addition to the count. The
-// v3 migration added the new columns. Legacy v1/v2 rows default
-// to 0 for the new columns.
-func writeInventory(ctx context.Context, tx *sql.Tx, w *core.World) error {
-	if w.PlayerID == "" {
+// Phase 18: each row stores the full core.Item metadata
+// (weight, value, max_durability) in addition to the count.
+// The v3 migration added the new columns. Legacy v1/v2 rows
+// default to 0 for the new columns.
+func writeInventory(ctx context.Context, tx *sql.Tx, personID string, inv map[string]core.Item) error {
+	if personID == "" || inv == nil {
 		return nil
 	}
-	if w.Inventory == nil {
-		return nil
-	}
-	for resource, item := range w.Inventory {
+	for resource, item := range inv {
 		if _, err := tx.ExecContext(ctx,
 			"INSERT INTO inventory (person_id, resource, amount, weight, value, max_durability) VALUES (?, ?, ?, ?, ?, ?)",
-			w.PlayerID, resource, float64(item.Count), item.Weight, item.Value, item.MaxDurability); err != nil {
-			return fmt.Errorf("persistence: write inventory %s/%s: %w", w.PlayerID, resource, err)
+			personID, resource, float64(item.Count), item.Weight, item.Value, item.MaxDurability); err != nil {
+			return fmt.Errorf("persistence: write inventory %s/%s: %w", personID, resource, err)
 		}
 	}
 	return nil
 }
 
-// readInventory reads the player's inventory rows from the inventory
-// table, scoped by personID. Returns a non-nil empty map when no
-// rows exist. An empty personID yields an empty map (nothing to
-// load for world-level mode).
+// readInventory reads a single person's inventory rows from
+// the inventory table, scoped by personID. Returns a non-nil
+// empty map when no rows exist or personID is empty. Phase
+// 19: called once per person (player + every NPC who had
+// rows on the prior Snapshot).
 //
-// Phase 18: each row returns a full core.Item (Count, Weight,
-// Value, MaxDurability). Legacy v1/v2 rows have 0 for the new
-// columns; the action engine can refresh the metadata from
-// the worldpack catalog on the next buy/sell.
+// Phase 18: each row returns a full core.Item (Count,
+// Weight, Value, MaxDurability). Legacy v1/v2 rows have 0
+// for the new columns; the action engine can refresh the
+// metadata from the worldpack catalog on the next buy/sell.
 func readInventory(db *DB, personID string) (map[string]core.Item, error) {
 	out := make(map[string]core.Item)
 	if personID == "" {
@@ -607,4 +605,76 @@ func readInventory(db *DB, personID string) (map[string]core.Item, error) {
 		return nil, fmt.Errorf("persistence: iterate inventory: %w", err)
 	}
 	return out, nil
+}
+
+// writeAllInventories writes inventory rows for the player
+// (w.Inventory) and for every NPC with a non-nil Inventory.
+// Phase 19: each person's stock round-trips independently
+// so a switch back to a pre-buy world preserves merchant
+// stock in addition to the player's items.
+func writeAllInventories(ctx context.Context, tx *sql.Tx, w *core.World) error {
+	if w.PlayerID != "" {
+		if err := writeInventory(ctx, tx, w.PlayerID, w.Inventory); err != nil {
+			return err
+		}
+	}
+	for _, p := range w.People {
+		if p == nil || p.ID == "" {
+			continue
+		}
+		// Avoid double-writing the player (already written
+		// above; p.Inventory is w.Inventory when p.ID ==
+		// w.PlayerID).
+		if p.ID == w.PlayerID {
+			continue
+		}
+		if p.Inventory == nil {
+			continue
+		}
+		if err := writeInventory(ctx, tx, p.ID, p.Inventory); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// readAllInventories reads inventory rows for the player
+// and for every NPC. The player's rows go into w.Inventory;
+// every other person's rows go into p.Inventory. Persons
+// with no rows still get a non-nil empty Inventory (so the
+// action engine can append without nil checks).
+//
+// The person list comes from the people table, so any NPC
+// who existed at Snapshot time and is still in the
+// restored w.People will be touched. A person present at
+// Snapshot but missing from the restored people map (which
+// should never happen given the full-replace semantics) is
+// silently skipped — their rows are abandoned in the DB.
+func readAllInventories(db *DB, w *core.World) error {
+	if w.PlayerID != "" {
+		inv, err := readInventory(db, w.PlayerID)
+		if err != nil {
+			return err
+		}
+		w.Inventory = inv
+	}
+	for _, p := range w.People {
+		if p == nil || p.ID == "" {
+			continue
+		}
+		if p.ID == w.PlayerID {
+			// Already loaded above.
+			continue
+		}
+		inv, err := readInventory(db, p.ID)
+		if err != nil {
+			return err
+		}
+		// readInventory always returns a non-nil map (empty
+		// when no rows), so p.Inventory is always non-nil
+		// after this assignment. The action engine can then
+		// append/lookup without nil checks.
+		p.Inventory = inv
+	}
+	return nil
 }
