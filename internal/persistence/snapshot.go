@@ -59,6 +59,15 @@ func (db *DB) Snapshot(w *core.World) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM memories"); err != nil {
 		return fmt.Errorf("persistence: delete memories: %w", err)
 	}
+	// Clear the player's inventory rows (only the player's, in case
+	// a future phase adds per-NPC inventories with a different
+	// person_id). A world with no PlayerID skips this.
+	if w.PlayerID != "" {
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM inventory WHERE person_id = ?", w.PlayerID); err != nil {
+			return fmt.Errorf("persistence: delete inventory: %w", err)
+		}
+	}
 	if err := writeMeta(ctx, tx, w); err != nil {
 		return err
 	}
@@ -79,6 +88,9 @@ func (db *DB) Snapshot(w *core.World) error {
 		if err := writeMemory(ctx, tx, &w.Memories[i]); err != nil {
 			return err
 		}
+	}
+	if err := writeInventory(ctx, tx, w); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("persistence: commit snapshot: %w", err)
@@ -129,16 +141,30 @@ func (db *DB) Restore(w *core.World) error {
 		return err
 	}
 	w.Memories = mems
+
+	// Inventory is scoped to the player (if any). A world with no
+	// PlayerID leaves w.Inventory as-is (it stays nil or whatever
+	// the caller set). Phase 17.6+ is player-only; Phase 18+ may
+	// promote to per-person inventories.
+	inv, err := readInventory(db, w.PlayerID)
+	if err != nil {
+		return err
+	}
+	if w.PlayerID != "" {
+		w.Inventory = inv
+	}
 	return nil
 }
 
-// writeMeta writes the world's metadata as key/value rows.
+// writeMeta writes the world's metadata as key/value rows. Phase
+// 17.6+ adds the `coin` key for the player's money.
 func writeMeta(ctx context.Context, tx *sql.Tx, w *core.World) error {
 	rows := map[string]string{
 		"id":   w.ID,
 		"seed": strconv.FormatInt(w.Seed, 10),
 		"tick": strconv.FormatInt(w.Tick, 10),
 		"now":  w.Now.UTC().Format(time.RFC3339Nano),
+		"coin": strconv.Itoa(w.Coin),
 	}
 	for k, v := range rows {
 		if _, err := tx.ExecContext(ctx,
@@ -222,6 +248,14 @@ func applyMeta(w *core.World, meta map[string]string) {
 	if v, ok := meta["now"]; ok {
 		if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
 			w.Now = t
+		}
+	}
+	// Phase 17.6+: coin is stored as TEXT in world_meta. A missing
+	// or unparseable value leaves w.Coin at its current value (0 by
+	// default, or whatever the caller set).
+	if v, ok := meta["coin"]; ok && v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			w.Coin = n
 		}
 	}
 }
@@ -512,4 +546,57 @@ func decodeTags(s sql.NullString) []string {
 		return []string{}
 	}
 	return out
+}
+
+// writeInventory writes the player's inventory rows to the inventory
+// table, scoped by PlayerID. A no-op if PlayerID is empty (world-
+// level mode) — there is no per-person inventory yet for that case.
+// Inventory uses the existing v1 inventory table (person_id,
+// resource, amount) so no schema migration is needed; the amount is
+// stored as a REAL to match the table's column type, but the
+// in-memory value is an int (Phase 17.6 simple counter).
+func writeInventory(ctx context.Context, tx *sql.Tx, w *core.World) error {
+	if w.PlayerID == "" {
+		return nil
+	}
+	if w.Inventory == nil {
+		return nil
+	}
+	for resource, amount := range w.Inventory {
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO inventory (person_id, resource, amount) VALUES (?, ?, ?)",
+			w.PlayerID, resource, float64(amount)); err != nil {
+			return fmt.Errorf("persistence: write inventory %s/%s: %w", w.PlayerID, resource, err)
+		}
+	}
+	return nil
+}
+
+// readInventory reads the player's inventory rows from the inventory
+// table, scoped by personID. Returns a non-nil empty map when no
+// rows exist. An empty personID yields an empty map (nothing to
+// load for world-level mode).
+func readInventory(db *DB, personID string) (map[string]int, error) {
+	out := make(map[string]int)
+	if personID == "" {
+		return out, nil
+	}
+	rows, err := db.Query(
+		"SELECT resource, amount FROM inventory WHERE person_id = ?", personID)
+	if err != nil {
+		return nil, fmt.Errorf("persistence: query inventory: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var resource string
+		var amount float64
+		if err := rows.Scan(&resource, &amount); err != nil {
+			return nil, fmt.Errorf("persistence: scan inventory: %w", err)
+		}
+		out[resource] = int(amount)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("persistence: iterate inventory: %w", err)
+	}
+	return out, nil
 }

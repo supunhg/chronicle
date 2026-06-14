@@ -45,6 +45,8 @@ package action
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -130,8 +132,10 @@ func (e *Engine) Resolve(ctx context.Context, in intent.Intent) (Result, error) 
 		return e.resolveBuy(in.Target, in.Args.Quantity), nil
 	case intent.ActionSell:
 		return e.resolveSell(in.Target, in.Args.Quantity), nil
-	case intent.ActionBranch, intent.ActionSwitch:
-		return Result{OK: false, Text: fmt.Sprintf("%s is not yet implemented (Phase 19+)", in.Action)}, nil
+	case intent.ActionBranch:
+		return e.resolveBranch(in.Target), nil
+	case intent.ActionSwitch:
+		return e.resolveSwitch(in.Target), nil
 	default:
 		return Result{}, fmt.Errorf("action: unknown action %q", in.Action)
 	}
@@ -407,6 +411,85 @@ func (e *Engine) resolveSell(item string, quantity int) Result {
 	return Result{OK: true, Text: fmt.Sprintf("You sell %d %s for %d coin. (Coin: %d)", quantity, item, value, e.world.Coin)}
 }
 
+// resolveBranch handles "branch <name>" — saves the current
+// world to a named branch file in branches/<name>.db.
+// Phase 17.7: branches are stored in a `branches/`
+// subdirectory relative to the current working directory.
+// The branch name is validated to prevent path traversal
+// (no "/", "\", "..", or empty names).
+//
+// Branch does not advance time (it's a disk operation,
+// not a simulation step). The current world is left
+// unchanged; use "switch" to restore a branch into the
+// current world.
+func (e *Engine) resolveBranch(name string) Result {
+	if name == "" {
+		return Result{OK: false, Text: "Branch what? (Usage: branch <name>)"}
+	}
+	if !isValidBranchName(name) {
+		return Result{OK: false, Text: fmt.Sprintf("Invalid branch name %q (no '/', '\\\\', '..', or empty).", name)}
+	}
+	path := branchPath(name)
+	if err := os.MkdirAll("branches", 0o755); err != nil {
+		return Result{OK: false, Text: fmt.Sprintf("branch: mkdir branches: %v", err)}
+	}
+	db, err := persistence.Open(path)
+	if err != nil {
+		return Result{OK: false, Text: fmt.Sprintf("branch: open %s: %v", path, err)}
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		return Result{OK: false, Text: fmt.Sprintf("branch: migrate: %v", err)}
+	}
+	if err := db.Snapshot(e.world); err != nil {
+		return Result{OK: false, Text: fmt.Sprintf("branch: snapshot: %v", err)}
+	}
+	return Result{OK: true, Text: fmt.Sprintf("Branched to %q (saved to %s).", name, path)}
+}
+
+// resolveSwitch handles "switch <name>" — restores the world
+// from a named branch file (branches/<name>.db). The
+// current world's in-memory state is replaced with the
+// branch's state. This is destructive: any unsaved changes
+// to the current world are lost.
+//
+// Switch does not advance time. After a switch, the
+// world's tick, people, locations, relationships, and
+// memories all reflect the branch's state.
+func (e *Engine) resolveSwitch(name string) Result {
+	if name == "" {
+		return Result{OK: false, Text: "Switch to what? (Usage: switch <name>)"}
+	}
+	if !isValidBranchName(name) {
+		return Result{OK: false, Text: fmt.Sprintf("Invalid branch name %q.", name)}
+	}
+	path := branchPath(name)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return Result{OK: false, Text: fmt.Sprintf("Branch %q does not exist (no file at %s).", name, path)}
+	}
+	db, err := persistence.Open(path)
+	if err != nil {
+		return Result{OK: false, Text: fmt.Sprintf("switch: open %s: %v", path, err)}
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		return Result{OK: false, Text: fmt.Sprintf("switch: migrate: %v", err)}
+	}
+	// Restore into the existing world. The Restore function
+	// clears the world's people, locations, relationships,
+	// and memories before loading from the DB.
+	if err := db.Restore(e.world); err != nil {
+		return Result{OK: false, Text: fmt.Sprintf("switch: restore: %v", err)}
+	}
+	// Ensure the Inventory map is initialized after Restore
+	// (a legacy DB written before Phase 17.6 may not have
+	// serialized the inventory).
+	if e.world.Inventory == nil {
+		e.world.Inventory = make(map[string]int)
+	}
+	return Result{OK: true, Text: fmt.Sprintf("Switched to %q. (tick %d, %d people)", name, e.world.Tick, len(e.world.People))}
+}
+
 // lookPerson renders a person's details. Delegates to the
 // Narrator's EventLook template (or the Narrator's LLM for
 // significant events, though look is routine).
@@ -611,4 +694,30 @@ var priceList = map[string]int{
 	"shield": 35,
 	"potion": 20,
 	"book":   10,
+}
+
+// isValidBranchName reports whether name is safe to use as
+// a branch filename. Rejects empty names, names containing
+// path separators, and parent-directory references. This
+// is a security check to prevent path traversal (e.g.,
+// "../../etc/passwd").
+func isValidBranchName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if strings.ContainsAny(name, "/\\\x00") {
+		return false
+	}
+	// Reject names that start with a dot (hidden files).
+	if strings.HasPrefix(name, ".") {
+		return false
+	}
+	return true
+}
+
+// branchPath returns the filesystem path for a branch name.
+// Branches are stored in a `branches/` subdirectory relative
+// to the current working directory.
+func branchPath(name string) string {
+	return filepath.Join("branches", name+".db")
 }

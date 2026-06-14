@@ -732,6 +732,171 @@ func TestSnapshot_NoMemories(t *testing.T) {
 	}
 }
 
+// TestSnapshot_CoinRoundTrip verifies that w.Coin survives
+// a Snapshot/Restore cycle. Phase 17.6 added Coin to core.World;
+// Phase 17.7 (branch/switch) needs it to round-trip so a switch
+// back to a pre-buy world restores the original coin balance.
+func TestSnapshot_CoinRoundTrip(t *testing.T) {
+	db := newTestDB(t)
+	w := core.NewWorld("coin-rt", 1, time.Date(1400, 1, 1, 0, 0, 0, 0, time.UTC))
+	w.PlayerID = "alice"
+	w.Coin = 137
+	if err := db.Snapshot(w); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	loaded := core.NewWorld("", 0, time.Time{})
+	loaded.PlayerID = "alice"
+	if err := db.Restore(loaded); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if loaded.Coin != 137 {
+		t.Errorf("Coin = %d, want 137", loaded.Coin)
+	}
+}
+
+// TestSnapshot_InventoryRoundTrip verifies that w.Inventory
+// survives a Snapshot/Restore cycle. Phase 17.6 added Inventory
+// to core.World; Phase 17.7 (branch/switch) needs it to round-trip
+// so a switch back to a pre-buy world restores the original
+// inventory. The existing v1 inventory table is reused, scoped by
+// PlayerID.
+func TestSnapshot_InventoryRoundTrip(t *testing.T) {
+	db := newTestDB(t)
+	w := core.NewWorld("inv-rt", 1, time.Date(1400, 1, 1, 0, 0, 0, 0, time.UTC))
+	w.PlayerID = "alice"
+	w.Inventory["bread"] = 3
+	w.Inventory["sword"] = 1
+	w.Inventory["apple"] = 5
+	if err := db.Snapshot(w); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	loaded := core.NewWorld("", 0, time.Time{})
+	loaded.PlayerID = "alice"
+	if err := db.Restore(loaded); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if len(loaded.Inventory) != 3 {
+		t.Fatalf("len(Inventory) = %d, want 3", len(loaded.Inventory))
+	}
+	if loaded.Inventory["bread"] != 3 {
+		t.Errorf("Inventory[bread] = %d, want 3", loaded.Inventory["bread"])
+	}
+	if loaded.Inventory["sword"] != 1 {
+		t.Errorf("Inventory[sword] = %d, want 1", loaded.Inventory["sword"])
+	}
+	if loaded.Inventory["apple"] != 5 {
+		t.Errorf("Inventory[apple] = %d, want 5", loaded.Inventory["apple"])
+	}
+}
+
+// TestSnapshot_InventoryOverwrite verifies full-replace semantics
+// for the player's inventory: a second Snapshot with different items
+// replaces the first.
+func TestSnapshot_InventoryOverwrite(t *testing.T) {
+	db := newTestDB(t)
+
+	w1 := core.NewWorld("first", 1, time.Date(1400, 1, 1, 0, 0, 0, 0, time.UTC))
+	w1.PlayerID = "alice"
+	w1.Inventory["bread"] = 3
+	w1.Inventory["sword"] = 1
+	if err := db.Snapshot(w1); err != nil {
+		t.Fatalf("first Snapshot: %v", err)
+	}
+
+	w2 := core.NewWorld("second", 2, time.Date(1500, 1, 1, 0, 0, 0, 0, time.UTC))
+	w2.PlayerID = "alice"
+	w2.Inventory["apple"] = 7
+	if err := db.Snapshot(w2); err != nil {
+		t.Fatalf("second Snapshot: %v", err)
+	}
+
+	loaded := core.NewWorld("", 0, time.Time{})
+	loaded.PlayerID = "alice"
+	if err := db.Restore(loaded); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if len(loaded.Inventory) != 1 {
+		t.Fatalf("len(Inventory) = %d, want 1 (full-replace semantics)", len(loaded.Inventory))
+	}
+	if loaded.Inventory["apple"] != 7 {
+		t.Errorf("Inventory[apple] = %d, want 7", loaded.Inventory["apple"])
+	}
+	if _, exists := loaded.Inventory["bread"]; exists {
+		t.Errorf("Inventory[bread] should be gone after overwrite")
+	}
+}
+
+// TestSnapshot_NoPlayerNoInventory verifies that a world with no
+// PlayerID does not touch the inventory table. Backward-compat:
+// legacy worlds (Phase 13 and earlier) had no player, so a Restore
+// must not crash and must not assign the inventory to a phantom
+// player.
+func TestSnapshot_NoPlayerNoInventory(t *testing.T) {
+	db := newTestDB(t)
+	w := core.NewWorld("no-player", 1, time.Date(1400, 1, 1, 0, 0, 0, 0, time.UTC))
+	w.Inventory["bread"] = 3
+	if err := db.Snapshot(w); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	loaded := core.NewWorld("", 0, time.Time{})
+	if err := db.Restore(loaded); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	// With no PlayerID, loaded.Inventory should be untouched (still
+	// nil from NewWorld, not a phantom map).
+	if len(loaded.Inventory) != 0 {
+		t.Errorf("len(Inventory) = %d, want 0 (no PlayerID means no inventory load)", len(loaded.Inventory))
+	}
+}
+
+// TestSnapshot_EmptyInventoryIsEmpty verifies that a world with an
+// empty (non-nil) Inventory map round-trips as an empty map, not
+// nil. The action engine reads `len(w.Inventory) == 0` and treats
+// nil vs empty the same, but downstream code may not.
+func TestSnapshot_EmptyInventoryIsEmpty(t *testing.T) {
+	db := newTestDB(t)
+	w := core.NewWorld("empty-inv", 1, time.Date(1400, 1, 1, 0, 0, 0, 0, time.UTC))
+	w.PlayerID = "alice"
+	// w.Inventory is already an empty (non-nil) map from NewWorld.
+	if err := db.Snapshot(w); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	loaded := core.NewWorld("", 0, time.Time{})
+	loaded.PlayerID = "alice"
+	if err := db.Restore(loaded); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if loaded.Inventory == nil {
+		t.Errorf("Inventory is nil; expected non-nil empty map")
+	}
+	if len(loaded.Inventory) != 0 {
+		t.Errorf("len(Inventory) = %d, want 0", len(loaded.Inventory))
+	}
+}
+
+// TestSnapshot_CoinZeroIsPreserved verifies that an explicit zero
+// Coin survives a round-trip. A parse error on "" would silently
+// turn 0 into 0 (lucky), but the more important property is that
+// the key is actually written — a missing key would also leave
+// Coin at 0, masking bugs.
+func TestSnapshot_CoinZeroIsPreserved(t *testing.T) {
+	db := newTestDB(t)
+	w := core.NewWorld("coin-zero", 1, time.Date(1400, 1, 1, 0, 0, 0, 0, time.UTC))
+	w.PlayerID = "alice"
+	w.Coin = 0
+	if err := db.Snapshot(w); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	loaded := core.NewWorld("", 0, time.Time{})
+	loaded.PlayerID = "alice"
+	if err := db.Restore(loaded); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if loaded.Coin != 0 {
+		t.Errorf("Coin = %d, want 0", loaded.Coin)
+	}
+}
+
 // TestSnapshot_ResumeEngineReadsMemories is the end-to-end test
 // that proves memories survive a full save/resume cycle: a world
 // with non-empty Memories is snapshotted, restored into a fresh

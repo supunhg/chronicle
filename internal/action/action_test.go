@@ -581,3 +581,201 @@ func TestResolve_Inventory_WithItems(t *testing.T) {
 		t.Errorf("inventory output missing 'Coin: 42': %q", res.Text)
 	}
 }
+
+// TestResolve_Branch_CreatesFile verifies that branch
+// saves the current world to branches/<name>.db.
+func TestResolve_Branch_CreatesFile(t *testing.T) {
+	w := newTestWorld()
+	w.Coin = 99
+	eng := New(w, nil)
+	// Use t.TempDir() as the CWD so branches/ is created
+	// in a clean location.
+	tmpDir := t.TempDir()
+	oldCwd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldCwd)
+
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionBranch, Target: "before_war"})
+	if !res.OK {
+		t.Fatalf("branch before_war: OK = false; Text = %q", res.Text)
+	}
+	if !strings.Contains(res.Text, "before_war") {
+		t.Errorf("branch output missing 'before_war': %q", res.Text)
+	}
+	// Verify the file exists.
+	path := filepath.Join("branches", "before_war.db")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	// Verify the branches/ directory was created.
+	if _, err := os.Stat("branches"); err != nil {
+		t.Errorf("branches/ directory not created: %v", err)
+	}
+}
+
+// TestResolve_Branch_EmptyName verifies that branch with
+// no name is rejected.
+func TestResolve_Branch_EmptyName(t *testing.T) {
+	w := newTestWorld()
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionBranch})
+	if res.OK {
+		t.Errorf("branch with no name: OK = true, want false")
+	}
+}
+
+// TestResolve_Branch_InvalidName verifies that branch
+// with path-traversal or invalid names is rejected.
+func TestResolve_Branch_InvalidName(t *testing.T) {
+	w := newTestWorld()
+	eng := New(w, nil)
+	tmpDir := t.TempDir()
+	oldCwd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldCwd)
+
+	badNames := []string{
+		"../etc/passwd",
+		"foo/bar",
+		"foo\\bar",
+		".",
+		"..",
+		".hidden",
+	}
+	for _, name := range badNames {
+		res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionBranch, Target: name})
+		if res.OK {
+			t.Errorf("branch %q: OK = true, want false (invalid name)", name)
+		}
+	}
+}
+
+// TestResolve_Switch_RestoresWorld verifies that switch
+// restores the world state from a branch file.
+func TestResolve_Switch_RestoresWorld(t *testing.T) {
+	w := newTestWorld()
+	eng := New(w, nil)
+	tmpDir := t.TempDir()
+	oldCwd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldCwd)
+
+	// Branch the initial state.
+	_, _ = eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionBranch, Target: "snapshot"})
+
+	// Mutate the world: move alice to ashford, give her 50 coin.
+	w.People["alice"].LocationID = "ashford"
+	w.Coin = 50
+
+	// Switch back to the branch.
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSwitch, Target: "snapshot"})
+	if !res.OK {
+		t.Fatalf("switch snapshot: OK = false; Text = %q", res.Text)
+	}
+	// The world should be restored: alice at blackwater, Coin=0.
+	if w.People["alice"].LocationID != "blackwater" {
+		t.Errorf("alice at %q after switch, want 'blackwater'", w.People["alice"].LocationID)
+	}
+	if w.Coin != 0 {
+		t.Errorf("Coin = %d after switch, want 0", w.Coin)
+	}
+}
+
+// TestResolve_Switch_UnknownBranch verifies that switch
+// to a non-existent branch is rejected.
+func TestResolve_Switch_UnknownBranch(t *testing.T) {
+	w := newTestWorld()
+	eng := New(w, nil)
+	tmpDir := t.TempDir()
+	oldCwd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldCwd)
+
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSwitch, Target: "nonexistent"})
+	if res.OK {
+		t.Errorf("switch nonexistent: OK = true, want false")
+	}
+	if !strings.Contains(res.Text, "does not exist") {
+		t.Errorf("switch unknown output missing 'does not exist': %q", res.Text)
+	}
+}
+
+// TestResolve_Switch_EmptyName verifies that switch with
+// no name is rejected.
+func TestResolve_Switch_EmptyName(t *testing.T) {
+	w := newTestWorld()
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSwitch})
+	if res.OK {
+		t.Errorf("switch with no name: OK = true, want false")
+	}
+}
+
+// TestResolve_Switch_InvalidName verifies that switch
+// with path-traversal names is rejected.
+func TestResolve_Switch_InvalidName(t *testing.T) {
+	w := newTestWorld()
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSwitch, Target: "../etc/passwd"})
+	if res.OK {
+		t.Errorf("switch ../etc/passwd: OK = true, want false")
+	}
+}
+
+// TestResolve_BranchSwitchRoundTrip verifies the full
+// branch → mutate → switch back → mutation reverted flow.
+func TestResolve_BranchSwitchRoundTrip(t *testing.T) {
+	w := newTestWorld()
+	eng := New(w, nil)
+	tmpDir := t.TempDir()
+	oldCwd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldCwd)
+
+	// 1. Branch the initial state.
+	_, _ = eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionBranch, Target: "v1"})
+
+	// 2. Mutate the world heavily.
+	w.People["alice"].LocationID = "ashford"
+	w.Coin = 100
+	w.Inventory["sword"] = 1
+	aliceRel := w.People["alice"]
+	_ = aliceRel
+	w.Memories = append(w.Memories, core.Memory{
+		ID: "test-mem", OwnerID: "alice", Tick: w.Tick, Description: "test",
+	})
+
+	// 3. Switch back to v1.
+	_, _ = eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSwitch, Target: "v1"})
+
+	// 4. Verify all mutations were reverted.
+	if w.People["alice"].LocationID != "blackwater" {
+		t.Errorf("alice at %q after round-trip, want 'blackwater'", w.People["alice"].LocationID)
+	}
+	if w.Coin != 0 {
+		t.Errorf("Coin = %d after round-trip, want 0", w.Coin)
+	}
+	if w.Inventory["sword"] != 0 {
+		t.Errorf("Inventory[sword] = %d after round-trip, want 0", w.Inventory["sword"])
+	}
+	if len(w.Memories) != 0 {
+		t.Errorf("Memories count = %d after round-trip, want 0", len(w.Memories))
+	}
+}
+
+// TestIsValidBranchName exhaustively checks the branch
+// name validator.
+func TestIsValidBranchName(t *testing.T) {
+	good := []string{"v1", "before_war", "main", "experiment-1", "branch_42"}
+	for _, name := range good {
+		if !isValidBranchName(name) {
+			t.Errorf("isValidBranchName(%q) = false, want true", name)
+		}
+	}
+	bad := []string{"", ".", "..", "../etc/passwd", "foo/bar", "foo\\bar", ".hidden", "foo\x00bar"}
+	for _, name := range bad {
+		if isValidBranchName(name) {
+			t.Errorf("isValidBranchName(%q) = true, want false", name)
+		}
+	}
+}

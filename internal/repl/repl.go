@@ -261,7 +261,16 @@ func (r *REPL) dispatch(in intent.Intent) error {
 		}
 		fmt.Fprintf(r.out, "%s is not yet implemented (Phase 17.4+).\n", in.Action)
 	case intent.ActionBranch, intent.ActionSwitch:
-		fmt.Fprintf(r.out, "%s is not yet implemented (Phase 17.5+).\n", in.Action)
+		if r.action != nil {
+			res, err := r.action.Resolve(ctxTODO(), intent.Intent{Action: in.Action, Target: in.Target})
+			if err != nil {
+				fmt.Fprintf(r.out, "error: %v\n", err)
+				return nil
+			}
+			fmt.Fprintln(r.out, res.Text)
+			return nil
+		}
+		fmt.Fprintf(r.out, "%s is not yet implemented (Phase 17.7+).\n", in.Action)
 	default:
 		return fmt.Errorf("unknown action %q", in.Action)
 	}
