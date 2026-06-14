@@ -57,8 +57,13 @@ type Person struct {
 	// Dynamic needs (GoalEngine input)
 	Needs map[string]int // e.g. {"hunger": 50, "wealth": 30}
 
-	// Long-term goals (GoalEngine input)
-	Goals []string // e.g. ["become_noble", "find_spouse"]
+	// Long-term goals (GoalEngine input). Phase 21 promoted
+	// from []string to []core.Goal so each goal carries its
+	// own Priority and Progress. Goals with Priority > 0
+	// participate in action scoring (GoalAlignment bonus);
+	// Progress advances when actions that satisfy the goal
+	// are selected.
+	Goals []Goal
 
 	// Inventory is the person's carried items, keyed by
 	// canonical lowercase item name. Phase 19: every person

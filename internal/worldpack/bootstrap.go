@@ -287,6 +287,7 @@ func generatePerson(
 		IsMerchant: isMerchant,
 		Traits:     traits,
 		Needs:      needs,
+		Goals:      []core.Goal{},
 	}
 }
 
