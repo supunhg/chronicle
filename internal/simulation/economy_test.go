@@ -302,21 +302,182 @@ func TestEconomyEngine_MultipleProducersAccumulate(t *testing.T) {
 	}
 }
 
+// TestEconomyEngine_ShortageBumpsHunger verifies that when
+// Settlement.Food falls below EconomyShortageThreshold (20),
+// every resident's NeedHunger is bumped by
+// EconomyShortagePenalty (5). The clamp at 100 protects
+// against unbounded growth.
+func TestEconomyEngine_ShortageBumpsHunger(t *testing.T) {
+	w := makeEconomyWorld(1)
+	w.Locations["village"].Settlement.Food = 10 // below threshold
+	p := &core.Person{
+		ID: "n0001", Name: "Alice", Gender: "F",
+		BirthTick: -20 * 365, Alive: true,
+		LocationID: "village", Occupation: "clerk",
+		Needs:      map[string]int{string(core.NeedHunger): 30},
+	}
+	w.AddPerson(p)
+	eng := NewEconomyEngine()
+	sim := tick.NewSimulation(w.Seed, eng)
+	if err := sim.Init(w); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := sim.Tick(w); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	got := p.Needs[string(core.NeedHunger)]
+	if got != 35 {
+		t.Errorf("hunger after 1 shortage tick = %d, want 35 (30 + 5)", got)
+	}
+}
+
+// TestEconomyEngine_ShortageHungerClampsAt100 verifies
+// that the shortage hunger bump is clamped at 100.
+func TestEconomyEngine_ShortageHungerClampsAt100(t *testing.T) {
+	w := makeEconomyWorld(1)
+	w.Locations["village"].Settlement.Food = 5
+	p := &core.Person{
+		ID: "n0001", Name: "Alice", Gender: "F",
+		BirthTick: -20 * 365, Alive: true,
+		LocationID: "village", Occupation: "clerk",
+		Needs:      map[string]int{string(core.NeedHunger): 98},
+	}
+	w.AddPerson(p)
+	eng := NewEconomyEngine()
+	sim := tick.NewSimulation(w.Seed, eng)
+	if err := sim.Init(w); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if err := sim.Tick(w); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	got := p.Needs[string(core.NeedHunger)]
+	if got != 100 {
+		t.Errorf("hunger after shortage tick starting at 98 = %d, want 100 (clamped)", got)
+	}
+}
+
+// TestEconomyEngine_FamineMemoryEmittedOnce verifies that a
+// famine_risk memory is emitted on the FIRST tick of a
+// shortage, not on subsequent ticks of the same shortage.
+// Transition detection uses Location.LastShortageTick.
+func TestEconomyEngine_FamineMemoryEmittedOnce(t *testing.T) {
+	w := makeEconomyWorld(1)
+	w.Locations["village"].Settlement.Food = 5
+	w.AddPerson(&core.Person{
+		ID: "n0001", Name: "Alice", Gender: "F",
+		BirthTick: -20 * 365, Alive: true,
+		LocationID: "village", Occupation: "clerk",
+		Needs:      map[string]int{string(core.NeedHunger): 50},
+	})
+	eng := NewEconomyEngine()
+	sim := tick.NewSimulation(w.Seed, eng)
+	if err := sim.Init(w); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	// Tick 1: first shortage tick — should emit 1 memory.
+	if err := sim.Tick(w); err != nil {
+		t.Fatalf("Tick 1: %v", err)
+	}
+	count1 := 0
+	for _, m := range w.Memories {
+		if containsTag(m.Tags, "famine_risk") {
+			count1++
+		}
+	}
+	if count1 != 1 {
+		t.Errorf("tick 1 famine_risk memory count = %d, want 1 (transition into shortage)", count1)
+	}
+	// Tick 2: still in shortage — no new memory.
+	if err := sim.Tick(w); err != nil {
+		t.Fatalf("Tick 2: %v", err)
+	}
+	count2 := 0
+	for _, m := range w.Memories {
+		if containsTag(m.Tags, "famine_risk") {
+			count2++
+		}
+	}
+	if count2 != 1 {
+		t.Errorf("tick 2 famine_risk memory count = %d, want 1 (no new memory during same shortage)", count2)
+	}
+	// Recover food; tick 3: no new memory.
+	w.Locations["village"].Settlement.Food = 100
+	if err := sim.Tick(w); err != nil {
+		t.Fatalf("Tick 3: %v", err)
+	}
+	count3 := 0
+	for _, m := range w.Memories {
+		if containsTag(m.Tags, "famine_risk") {
+			count3++
+		}
+	}
+	if count3 != 1 {
+		t.Errorf("tick 3 famine_risk memory count = %d, want 1 (recovered, no new memory)", count3)
+	}
+	// Drop food again; tick 4: NEW memory (recovery -> re-shortage transition).
+	w.Locations["village"].Settlement.Food = 5
+	if err := sim.Tick(w); err != nil {
+		t.Fatalf("Tick 4: %v", err)
+	}
+	count4 := 0
+	for _, m := range w.Memories {
+		if containsTag(m.Tags, "famine_risk") {
+			count4++
+		}
+	}
+	if count4 != 2 {
+		t.Errorf("tick 4 famine_risk memory count = %d, want 2 (re-shortage transition emits a new memory)", count4)
+	}
+}
+
+// TestEconomyEngine_NoShortageNoMemory verifies that a
+// well-stocked location never emits famine_risk memories.
+func TestEconomyEngine_NoShortageNoMemory(t *testing.T) {
+	w := makeEconomyWorld(1)
+	w.Locations["village"].Settlement.Food = 50 // above threshold
+	w.AddPerson(&core.Person{
+		ID: "n0001", Name: "Alice", Gender: "F",
+		BirthTick: -20 * 365, Alive: true,
+		LocationID: "village", Occupation: "clerk",
+		Needs:      map[string]int{string(core.NeedHunger): 50},
+	})
+	eng := NewEconomyEngine()
+	sim := tick.NewSimulation(w.Seed, eng)
+	if err := sim.Init(w); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		if err := sim.Tick(w); err != nil {
+			t.Fatalf("Tick %d: %v", i, err)
+		}
+	}
+	for _, m := range w.Memories {
+		if containsTag(m.Tags, "famine_risk") {
+			t.Errorf("unexpected famine_risk memory at tick %d: %+v", m.Tick, m)
+		}
+	}
+}
+
 // TestProducedByMapping verifies the occupation -> resource
 // mapping for the v1 producer set. This is the canonical
-// reference for what each occupation produces.
+// reference for what each occupation produces. Phase 22.5
+// removed baker/hunter/carpenter from the producer set to
+// match the spec's exact 4 producers.
 func TestProducedByMapping(t *testing.T) {
 	cases := []struct {
 		occ  string
 		want core.ResourceID
 	}{
 		{"farmer", core.ResourceFood},
-		{"baker", core.ResourceFood},
-		{"hunter", core.ResourceFood},
 		{"woodcutter", core.ResourceWood},
-		{"carpenter", core.ResourceWood},
 		{"miner", core.ResourceIron},
 		{"weaver", core.ResourceCloth},
+		// Phase 22.5: dropped from producers (per spec).
+		{"baker", ""},
+		{"hunter", ""},
+		{"carpenter", ""},
+		// Other non-producers.
 		{"merchant", ""},
 		{"blacksmith", ""},
 		{"guard", ""},

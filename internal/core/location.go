@@ -82,6 +82,16 @@ type Location struct {
 	// each tick. Zero values are a valid initial state; the
 	// engine seeds them from the worldpack catalog at Init.
 	Prices Prices
+
+	// LastShortageTick is the last tick at which this location
+	// was in food shortage (Settlement.Food below the
+	// EconomyEngine's shortageThreshold). The engine uses this
+	// for transition detection: a famine_risk memory is
+	// emitted on the first tick of a shortage (when
+	// LastShortageTick < w.Tick - 1) and not on subsequent
+	// ticks of the same shortage. 0 means the location has
+	// never been in shortage.
+	LastShortageTick int64
 }
 
 // NewLocation returns a Location with the given ID, name, region, and

@@ -25,6 +25,8 @@
 package simulation
 
 import (
+	"fmt"
+
 	"github.com/chronicle-dev/chronicle/internal/core"
 )
 
@@ -72,6 +74,22 @@ const (
 	// `production_loops.miner.output.iron = 0.5` field of
 	// the worldpack and can be hooked up in v2.
 	EconomyProductionPerTick = 1.0
+
+	// EconomyShortageThreshold is the per-location food stock
+	// below which the location is considered "in shortage".
+	// Phase 22.5: when Settlement.Food < threshold, every
+	// resident's NeedHunger is bumped by EconomyShortagePenalty
+	// each tick and a famine_risk memory is emitted on the
+	// first shortage tick.
+	EconomyShortageThreshold = 20.0
+
+	// EconomyShortagePenalty is the per-tick hunger bump
+	// applied to every person at a location in food shortage.
+	// Phase 22.5 v1: 5 (a single tick of shortage raises
+	// every resident's hunger by 5). With the default
+	// NeedHunger starting at 50, a 10-tick unbroken shortage
+	// pins hunger at 100, which dominates WorkAction scoring.
+	EconomyShortagePenalty = 5
 )
 
 // Init is a no-op for the v1 EconomyEngine — the bootstrap
@@ -135,8 +153,20 @@ func (e *EconomyEngine) runProduction(w *core.World) {
 // runConsumption has every living person at a location eat
 // EconomyDefaultConsumePerTick food. If the location is out
 // of food, the stock clamps at 0 and the price recalc will
-// produce a 10x spike (which future phases can hook into a
-// hunger-need penalty or an Event Engine reaction).
+// produce a 10x spike.
+//
+// Phase 22.5 (Economic Feedback Loop): if a location's food
+// stock falls below EconomyShortageThreshold, every person
+// at that location has their NeedHunger bumped by
+// EconomyShortagePenalty (clamped at 100). The first tick of
+// a shortage emits a famine_risk memory for every affected
+// resident; subsequent ticks of the same shortage do not
+// emit again (transition detection via LastShortageTick).
+//
+// This is the spec's "Shortages -> New NPC Goals" arrow:
+// hungry NPCs see a higher WorkAction.Score (which has
+// +hunger*0.4) and start preferring food production, which
+// stabilizes the settlement.
 func (e *EconomyEngine) runConsumption(w *core.World) {
 	for _, p := range w.LivingPeople() {
 		if p.LocationID == "" {
@@ -151,6 +181,55 @@ func (e *EconomyEngine) runConsumption(w *core.World) {
 			consumed = loc.Settlement.Food
 		}
 		loc.Settlement.Food -= consumed
+
+		// Phase 22.5: shortage detection. Bump hunger and
+		// (on the transition tick) emit a memory.
+		if loc.Settlement.Food < EconomyShortageThreshold {
+			if p.Needs == nil {
+				p.Needs = make(map[string]int)
+			}
+			hunger := p.Needs[string(core.NeedHunger)] + EconomyShortagePenalty
+			if hunger > 100 {
+				hunger = 100
+			}
+			p.Needs[string(core.NeedHunger)] = hunger
+		}
+	}
+
+	// Phase 22.5: emit a famine_risk memory on the first tick
+	// of each shortage. Transition detection: a memory is
+	// emitted only if the previous tick was NOT a shortage.
+	// LastShortageTick=0 is the "never in shortage" sentinel
+	// (set at bootstrap); a non-zero value means we have
+	// recorded a shortage in some previous tick.
+	for _, loc := range w.Locations {
+		if loc.Settlement.Food >= EconomyShortageThreshold {
+			continue
+		}
+		// Emit iff we have a non-zero prior shortage record
+		// AND the prior record is for the immediately
+		// preceding tick. The non-zero check handles the
+		// bootstrap case (LastShortageTick=0 means "never in
+		// shortage" — the first shortage tick IS a
+		// transition). The >= w.Tick-1 check handles the
+		// in-shortage case (no transition between consecutive
+		// shortage ticks).
+		if loc.LastShortageTick != 0 && loc.LastShortageTick >= w.Tick-1 {
+			continue
+		}
+		loc.LastShortageTick = w.Tick
+		for _, p := range w.LivingPeopleAt(loc.ID) {
+			w.Memories = append(w.Memories, core.Memory{
+				ID:          fmt.Sprintf("mem-famine-%d-%s", w.Tick, p.ID),
+				OwnerID:     p.ID,
+				EventID:     fmt.Sprintf("famine-%d-%s", w.Tick, loc.ID),
+				Tick:        w.Tick,
+				Importance:  0.5,
+				Recency:     1.0,
+				Description: fmt.Sprintf("Food shortages spread through %s.", loc.Name),
+				Tags:        []string{"famine_risk"},
+			})
+		}
 	}
 }
 
@@ -207,15 +286,19 @@ func recomputePrice(w *core.World, resource core.ResourceID, stock float64) int 
 }
 
 // producedBy returns the resource produced by the given
-// occupation, or "" for non-producers. V1: 4 producers
-// (farmer, woodcutter, miner, weaver) and 1 baker-as-co-producer
-// (baker also produces food, less than a farmer per the v2
-// plan). All other occupations are non-producers.
+// occupation, or "" for non-producers. V1: exactly 4
+// producers (farmer, woodcutter, miner, weaver) per the
+// Phase 22 spec. Bakers, hunters, and carpenters are
+// non-producers in v1: bakers consume food (like everyone
+// else), hunters do not produce in v1 (could be added in
+// v2), and carpenters do not cut wood (they shape it from
+// existing stock — that path can be added when the
+// per-occupation production scaling lands).
 func producedBy(occupation string) core.ResourceID {
 	switch occupation {
-	case "farmer", "baker", "hunter":
+	case "farmer":
 		return core.ResourceFood
-	case "woodcutter", "carpenter":
+	case "woodcutter":
 		return core.ResourceWood
 	case "miner":
 		return core.ResourceIron
