@@ -78,6 +78,73 @@ func BuildItemCatalog(economy EconomySpec) map[string]core.Item {
 	return out
 }
 
+// BuildMerchantInventory seeds a merchant's Inventory from the
+// worldpack's item catalog, using the occupation's
+// MerchantInventory allowlist (Phase 20) when set, or falling
+// back to the full catalog (Phase 19 behavior) when the
+// allowlist is empty.
+//
+// The returned map is keyed by canonical lowercase item name.
+// Each entry copies the catalog's metadata (Weight, Value,
+// MaxDurability) and sets Count to startingCount.
+//
+// Behavior:
+//   - allowlist non-empty: stock only the items in the
+//     allowlist (entries not in the catalog are silently
+//     skipped, so a typo in occupations.yaml doesn't crash
+//     bootstrap).
+//   - allowlist empty/nil: stock the full catalog (Phase 19
+//     fallback for legacy worldpacks that don't yet use the
+//     allowlist).
+//
+// The function never returns nil — an empty allowlist that
+// matches no catalog items yields an empty (but non-nil) map,
+// which the action engine handles correctly (a merchant with
+// no stock rejects all buy attempts).
+func BuildMerchantInventory(allowlist []string, catalog map[string]core.Item, startingCount int) map[string]core.Item {
+	out := make(map[string]core.Item)
+	if startingCount <= 0 {
+		startingCount = 10
+	}
+	if len(allowlist) == 0 {
+		// Backward compat (Phase 19): full catalog.
+		for itemName, c := range catalog {
+			out[itemName] = core.Item{
+				Name:          itemName,
+				Count:         startingCount,
+				Weight:        c.Weight,
+				Value:         c.Value,
+				MaxDurability: c.MaxDurability,
+			}
+		}
+		return out
+	}
+	// Phase 20: allowlist mode. Lowercase each entry for
+	// case-insensitive lookup, skip unknown items.
+	seen := make(map[string]bool, len(allowlist))
+	for _, name := range allowlist {
+		key := strings.ToLower(strings.TrimSpace(name))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		c, ok := catalog[key]
+		if !ok {
+			// Silently skip catalog misses — a typo in
+			// occupations.yaml shouldn't crash bootstrap.
+			continue
+		}
+		out[key] = core.Item{
+			Name:          key,
+			Count:         startingCount,
+			Weight:        c.Weight,
+			Value:         c.Value,
+			MaxDurability: c.MaxDurability,
+		}
+	}
+	return out
+}
+
 // DefaultItemSpec returns the Phase 18 default weight, value,
 // and max-durability for a given resource name. This is a
 // hand-tuned v1 table for the common Phase 17.6 goods. The

@@ -96,7 +96,9 @@ func Bootstrap(pack *Pack, w *core.World, seed int64) error {
 
 	// 6.5 Seed merchant inventories. Phase 19: any Person whose
 	// occupation has is_merchant=true gets an Inventory seeded
-	// from the worldpack's item catalog. The starting count
+	// from the worldpack's item catalog. Phase 20: the
+	// occupation's merchant_inventory allowlist (if non-empty)
+	// restricts the seed to a niche subset. The starting count
 	// defaults to 10 per item (or whatever merchant_starting_stock
 	// says). The action engine's resolveBuy decrements the
 	// merchant's Count; resolveSell increments it.
@@ -108,20 +110,7 @@ func Bootstrap(pack *Pack, w *core.World, seed int64) error {
 		if !ok {
 			continue
 		}
-		stock := occSpec.MerchantStartingStock
-		if stock <= 0 {
-			stock = 10
-		}
-		p.Inventory = make(map[string]core.Item, len(w.Items))
-		for itemName, catalog := range w.Items {
-			p.Inventory[itemName] = core.Item{
-				Name:          itemName,
-				Count:         stock,
-				Weight:        catalog.Weight,
-				Value:         catalog.Value,
-				MaxDurability: catalog.MaxDurability,
-			}
-		}
+		p.Inventory = BuildMerchantInventory(occSpec.MerchantInventory, w.Items, occSpec.MerchantStartingStock)
 	}
 
 	// 7. Recompute populations (Location.Population is derived state)

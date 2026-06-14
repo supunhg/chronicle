@@ -120,6 +120,17 @@ type OccupationSpec struct {
 	// to e.g. 25 for a well-stocked general store, or 3 for a
 	// traveling peddler with limited goods.
 	MerchantStartingStock int `yaml:"merchant_starting_stock"`
+
+	// MerchantInventory is an allowlist of items this merchant
+	// stocks. Phase 20: when set, the merchant's starting
+	// inventory contains ONLY these items (each at
+	// MerchantStartingStock count). When omitted or empty, the
+	// merchant gets the full catalog (backward compat with
+	// Phase 19). The allowlist enables niche merchants — a
+	// swordsmith stocks sword + shield, not bread + potion +
+	// bed. Item names are lowercased before lookup; entries
+	// not present in the world catalog are silently skipped.
+	MerchantInventory []string `yaml:"merchant_inventory"`
 }
 
 // ActionRuleSpec is one contextual action rule in actions.yaml.
