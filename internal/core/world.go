@@ -89,6 +89,15 @@ type World struct {
 	// counter. Buy reduces Coin; sell increases it. Phase 18+
 	// may add inflation, debt, and per-faction currencies.
 	Coin int
+
+	// Events is the world-wide event log, populated by the
+	// EventEngine each tick. Phase 23 v1: events are emitted
+	// (appended) by state-driven rules, never applied. Future
+	// engines consume this log to react (e.g., a Famine event
+	// might bump hunger-need on top of the per-tick shortage
+	// penalty, or a TheftWave might increment a crime counter
+	// on a location). Append-only.
+	Events []Event
 }
 
 // Item represents a single item type in the world. The same
