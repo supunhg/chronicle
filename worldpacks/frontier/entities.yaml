@@ -1,0 +1,97 @@
+# Frontier world pack: entities
+# chronicle-spec.md §2.1
+#
+# All locations in the Free Marches. IDs are stable strings; names
+# are display strings.
+
+region:
+  name: "The Free Marches"
+  size_km: 120
+  era: "Late Medieval / Early Renaissance (1400-1500 equivalent)"
+
+locations:
+  - id: "blackwater"
+    name: "Blackwater"
+    kind: "town"
+    region: "The Free Marches"
+    population: 80
+    population_cap: 80
+    buildings:
+      - "Town Hall"
+      - "Inn"
+      - "Market"
+      - "Smithy"
+      - "Bakery"
+      - "Temple"
+      - "Stables"
+      - "Guild Hall"
+
+  - id: "millbrook"
+    name: "Millbrook"
+    kind: "village"
+    region: "The Free Marches"
+    population: 13
+    population_cap: 20
+
+  - id: "ashford"
+    name: "Ashford"
+    kind: "village"
+    region: "The Free Marches"
+    population: 12
+    population_cap: 20
+
+  - id: "thornkeep"
+    name: "Thornkeep"
+    kind: "village"
+    region: "The Free Marches"
+    population: 13
+    population_cap: 20
+
+  - id: "elderfield"
+    name: "Elderfield"
+    kind: "village"
+    region: "The Free Marches"
+    population: 12
+    population_cap: 20
+
+  - id: "dawn_monastery"
+    name: "Dawn Monastery"
+    kind: "monastery"
+    region: "The Free Marches"
+    population: 5
+    population_cap: 10
+
+  - id: "northwatch_fort"
+    name: "Northwatch Fort"
+    kind: "fort"
+    region: "The Free Marches"
+    population: 5
+    population_cap: 15
+
+trade_routes:
+  - id: "blackwater_millbrook"
+    from: "blackwater"
+    to: "millbrook"
+  - id: "blackwater_ashford"
+    from: "blackwater"
+    to: "ashford"
+  - id: "blackwater_thornkeep"
+    from: "blackwater"
+    to: "thornkeep"
+  - id: "blackwater_elderfield"
+    from: "blackwater"
+    to: "elderfield"
+  - id: "ashford_dawn_monastery"
+    from: "ashford"
+    to: "dawn_monastery"
+  - id: "northwatch_thornkeep"
+    from: "northwatch_fort"
+    to: "thornkeep"
+
+geography:
+  forest: "Whisperwood"
+  river: "River Black"
+  landmarks:
+    - "The Old Mill"
+    - "Dawn Hill"
+    - "Whisperwood Edge"

@@ -1,0 +1,28 @@
+# Build output
+chronicle
+chronicle.exe
+*.exe
+
+# SQLite artifacts (test runs, local saves)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Test coverage
+coverage.out
+*.coverprofile
+
+# Editor / OS junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
+
+# Go workspace
+go.work
+go.work.sum

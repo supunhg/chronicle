@@ -1,0 +1,193 @@
+// Package core defines the minimal domain types for Chronicle's simulation.
+package core
+
+import (
+	"sort"
+	"time"
+)
+
+// World is the top-level container for all simulation state.
+type World struct {
+	// ID is the unique identifier for this world (short hex, 8 chars).
+	ID string
+
+	// Tick is the current simulation tick. Starts at 0 and increments by
+	// one each time the orchestration layer runs a full tick.
+	Tick int64
+
+	// Seed is the deterministic seed for all RNG in this world.
+	Seed int64
+
+	// Now is the simulated clock time corresponding to the current tick.
+	Now time.Time
+
+	// People is the registry of all Person records, keyed by ID.
+	People map[string]*Person
+
+	// Locations is the registry of all Location records, keyed by ID.
+	// Phase 2: required for migration and birth logic.
+	Locations map[string]*Location
+
+	// Factions is the registry of all Faction records, keyed by ID.
+	// Phase 4: populated by worldpack.Bootstrap. Membership is derived.
+	Factions map[string]*Faction
+
+	// Relationships is the registry of all Relationship records.
+	// Phase 2: stub-only, populated by RelationshipEngine in later phases.
+	Relationships []Relationship
+
+	// Memories is the registry of all Memory records, owned by
+	// the PopulationEngine / EventEngine (see chronicle-spec.md §5.6).
+	// Phase 13: persisted by Snapshot/Restore. A memory's
+	// TrustDelta and RelationshipDelta are baked into the
+	// corresponding relationship score on write, so the
+	// relationships slice is the cached aggregate of the
+	// memories slice.
+	Memories []Memory
+
+	// Rules holds the tunable world rules, populated by
+	// worldpack.Bootstrap from pack.Rules. If nil, engines fall back
+	// to their built-in defaults (see World.RulesOrDefault).
+	//
+	// Defined as a core type (rather than a *worldpack.Pack) to avoid
+	// a circular import: worldpack already imports core, so core
+	// cannot import worldpack.
+	Rules *WorldRules
+}
+
+// WorldRules holds the tunable world rules. Fields are sourced from a
+// worldpack's Rules.Lifecycle and Rules.Family blocks.
+//
+// Zero values in a populated WorldRules are legitimate (e.g.,
+// AnnualDeathChance = 0 for a world without mortality). Engines that
+// consult World.RulesOrDefault should treat zero values as "use this
+// value", not "use the default". The default is only used when
+// World.Rules itself is nil.
+type WorldRules struct {
+	// Lifecycle (from pack.Rules.Lifecycle)
+	AdultAge          int
+	FertileMinAge     int
+	FertileMaxAge     int
+	AnnualDeathChance float64
+
+	// Family (from pack.Rules.Family)
+	MinBirthIntervalTicks int64
+	MaxChildren           int
+
+	// Migration (from pack.Rules.Migration)
+	//
+	// MigrationFraction is the fraction of the over-cap excess that
+	// attempts to migrate each tick. Set to 0 to disable migration
+	// entirely. The built-in default (via RulesOrDefault when
+	// w.Rules is nil) is 0.5.
+	MigrationFraction float64
+
+	// MinMigrantsPerTick is the floor on the number of migrants that
+	// move from an over-cap location each tick. The built-in default
+	// is 1.
+	MinMigrantsPerTick int
+}
+
+// NewWorld returns a World with the given ID, seed, and starting time.
+// Rules is left nil; callers (typically worldpack.Bootstrap) set it
+// after loading a worldpack.
+func NewWorld(id string, seed int64, start time.Time) *World {
+	return &World{
+		ID:            id,
+		Seed:          seed,
+		Now:           start,
+		People:        make(map[string]*Person),
+		Locations:     make(map[string]*Location),
+		Factions:      make(map[string]*Faction),
+		Relationships: []Relationship{},
+		Memories:      []Memory{},
+	}
+}
+
+// RulesOrDefault returns w.Rules if set, otherwise a default value
+// matching the Phase 2 v1 simulation constants. Engines should call
+// this at the start of Tick (or per-decision) so a world with no
+// pack falls back to sane defaults.
+func (w *World) RulesOrDefault() WorldRules {
+	if w.Rules != nil {
+		return *w.Rules
+	}
+	return WorldRules{
+		AdultAge:              16,
+		FertileMinAge:         16,
+		FertileMaxAge:         50,
+		AnnualDeathChance:     0.01,
+		MinBirthIntervalTicks: 365,
+		MaxChildren:           6,
+		MigrationFraction:     0.5,
+		MinMigrantsPerTick:    1,
+	}
+}
+
+// AddPerson registers a person. Panics on duplicate ID (programming error).
+func (w *World) AddPerson(p *Person) *Person {
+	if _, exists := w.People[p.ID]; exists {
+		panic("core: duplicate person ID " + p.ID)
+	}
+	w.People[p.ID] = p
+	return p
+}
+
+// AddLocation registers a location. Panics on duplicate ID.
+func (w *World) AddLocation(l *Location) *Location {
+	if _, exists := w.Locations[l.ID]; exists {
+		panic("core: duplicate location ID " + l.ID)
+	}
+	w.Locations[l.ID] = l
+	return l
+}
+
+// LivingPeople returns all currently-alive people in deterministic order
+// (sorted by ID). The deterministic order is required for reproducibility.
+func (w *World) LivingPeople() []*Person {
+	out := make([]*Person, 0, len(w.People))
+	for _, p := range w.People {
+		if p.Alive {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// LivingPeopleAt returns the alive people at a given location, in
+// deterministic order (sorted by ID). People with an empty
+// LocationID are returned only when the empty string is passed.
+func (w *World) LivingPeopleAt(locationID string) []*Person {
+	out := make([]*Person, 0, len(w.People))
+	for _, p := range w.People {
+		if p.Alive && p.LocationID == locationID {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// RecomputeLocationPopulations walks all living people and updates
+// each location's Population count. Call this before reading
+// Location.Population in tests or snapshots.
+func (w *World) RecomputeLocationPopulations() {
+	// Reset
+	ids := make([]string, 0, len(w.Locations))
+	for id := range w.Locations {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		w.Locations[id].Population = 0
+	}
+	// Tally
+	for _, p := range w.LivingPeople() {
+		if p.LocationID != "" {
+			if loc, ok := w.Locations[p.LocationID]; ok {
+				loc.Population++
+			}
+		}
+	}
+}

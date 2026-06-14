@@ -1,0 +1,93 @@
+# Frontier world pack: tunable rules
+# chronicle-spec.md §2.7
+
+# ---- Lifecycle ----
+lifecycle:
+  annual_death_chance: 0.01
+  aging_year_ticks: 365
+  adult_age: 16
+  fertile_min_age: 16
+  fertile_max_age: 50
+  record_death_tick: true
+
+# ---- Family ----
+family:
+  min_birth_interval_ticks: 365
+  max_children: 6
+  inheritance:
+    priority: ["children", "siblings", "parents"]
+    # Heir logic per spec §5.1: closest living blood relative.
+
+# ---- Migration ----
+migration:
+  pressure_calculation: "ratio"  # (excess / cap) * 100, capped at 100
+  fraction_moved_per_tick: 0.5
+  min_migrants_per_tick: 1
+  destination_strategy: "first_under_cap_by_id"  # deterministic
+
+# ---- Economy ----
+economy:
+  resources: ["food", "wood", "iron", "cloth", "coin"]
+  starting_coin_per_person: 10
+  inflation_threshold: 0.1
+  production_loops:
+    farmer:     { output: { food: 1.0 }, requires: { tools: 0.05, labor: 1.0 } }
+    woodcutter: { output: { wood: 1.0 }, requires: { tools: 0.05, labor: 1.0 } }
+    blacksmith: { output: { tools: 0.05 }, requires: { iron: 0.2, wood: 0.1, labor: 1.0 } }
+    weaver:     { output: { cloth: 1.0 }, requires: { tools: 0.02, labor: 1.0 } }
+    miner:      { output: { iron: 0.5 }, requires: { tools: 0.1, labor: 1.0 } }
+  productivity:
+    tools_multiplier_per_5: 1.5  # 5+ tools -> 1.5x output
+
+# ---- Memory ----
+memory:
+  importance_threshold: 0.7  # above this: persist indefinitely
+  default_decay_per_tick: 0.001
+  recency_floor: 0.0
+  schema_version: 1
+
+# ---- Relationships ----
+relationships:
+  axes: ["trust", "respect", "fear", "attraction", "loyalty"]
+  default: 0
+  min: -100
+  max: 100
+  decay_per_tick: 0.01  # very slow natural decay toward 0
+
+# ---- Events ----
+events:
+  frequency_per_tick: 0.05  # ~5% chance per tick of a significant event
+  kinds:
+    - "fire"
+    - "famine"
+    - "crime"
+    - "political_unrest"
+    - "religious_movement"
+    - "epidemic"
+    - "market_day"
+    - "bandit_attack"
+    - "good_harvest"
+    - "bad_harvest"
+
+# ---- Initial tensions (per spec §2.7) ----
+tensions:
+  - id: "trade_crisis"
+    name: "Trade Crisis"
+    description: "Food prices rising."
+    intensity: 0.3
+    affected_factions: ["merchant_guild", "frontier_league"]
+    affected_locations: ["blackwater", "villages"]
+
+  - id: "council_corruption"
+    name: "Council Corruption"
+    description: "Mayor accused of favoritism."
+    intensity: 0.2
+    affected_factions: ["town_council"]
+    affected_locations: ["blackwater"]
+
+  - id: "religious_dispute"
+    name: "Religious Dispute"
+    description: "Temple seeking greater influence."
+    intensity: 0.2
+    affected_factions: ["faith_of_dawn", "town_council"]
+    affected_locations: ["blackwater"]

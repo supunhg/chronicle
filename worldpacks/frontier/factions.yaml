@@ -1,0 +1,57 @@
+# Frontier world pack: factions
+# chronicle-spec.md §2.3
+#
+# Four factions, each with a goal, a member pool, and a structural role
+# in the world's politics. Faction membership is computed at world
+# generation based on occupation and traits; it is not a hard-coded list.
+
+factions:
+  - id: "merchant_guild"
+    name: "Merchant Guild"
+    goal: "Profit, trade, influence"
+    color: "gold"
+    members:
+      occupations: ["merchant", "trader", "innkeeper"]
+      recruitment_criteria:
+        wealth_min: 200
+        social_class: ["middle", "upper"]
+    rivals: ["frontier_league"]
+    allies: ["town_council"]
+    base_location: "blackwater"
+
+  - id: "town_council"
+    name: "Town Council"
+    goal: "Stability, taxes, law"
+    color: "blue"
+    members:
+      occupations: ["mayor", "clerk", "landowner", "guard"]
+      recruitment_criteria:
+        social_class: ["upper"]
+    rivals: []
+    allies: ["merchant_guild"]
+    base_location: "blackwater"
+
+  - id: "faith_of_dawn"
+    name: "Faith of the Dawn"
+    goal: "Charity, morality, social influence"
+    color: "white"
+    members:
+      occupations: ["priest", "monk", "teacher"]
+      recruitment_criteria:
+        trait_min: { devout: 60 }
+    rivals: []
+    allies: []
+    base_location: "dawn_monastery"
+
+  - id: "frontier_league"
+    name: "Frontier League"
+    goal: "Independence, expansion, land ownership"
+    color: "green"
+    members:
+      occupations: ["hunter", "farmer", "carpenter", "laborer"]
+      recruitment_criteria:
+        social_class: ["lower", "middle"]
+        location: ["villages", "northwatch_fort"]
+    rivals: ["merchant_guild"]
+    allies: []
+    base_location: "thornkeep"

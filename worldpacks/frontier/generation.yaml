@@ -1,0 +1,111 @@
+# Frontier world pack: generation parameters
+# chronicle-spec.md §2.2
+
+population:
+  total: 150
+
+gender_ratio:
+  female: 0.51
+  male: 0.49
+
+age_distribution:
+  - range: [0, 15]
+    share: 0.25
+  - range: [16, 30]
+    share: 0.30
+  - range: [31, 50]
+    share: 0.30
+  - range: [51, 100]
+    share: 0.15
+
+location_distribution:
+  - location: "blackwater"
+    count: 80
+  - location: "villages"
+    count: 50
+  - location: "travelers"
+    count: 10
+  - location: "nobility"
+    count: 5
+  - location: "clergy"
+    count: 5
+
+social_class_distribution:
+  - class: "lower"
+    share: 0.65
+  - class: "middle"
+    share: 0.30
+  - class: "upper"
+    share: 0.05
+
+# Trait initialization. Each person gets a value in [min, max] sampled
+# uniformly. Defaults apply if not otherwise specified.
+traits:
+  ambitious:   { min: 0, max: 100, default: 50 }
+  greedy:      { min: 0, max: 100, default: 40 }
+  kind:        { min: 0, max: 100, default: 50 }
+  social:      { min: 0, max: 100, default: 50 }
+  brave:       { min: 0, max: 100, default: 50 }
+  honest:      { min: 0, max: 100, default: 50 }
+  curious:     { min: 0, max: 100, default: 50 }
+  patient:     { min: 0, max: 100, default: 50 }
+  creative:    { min: 0, max: 100, default: 50 }
+  devout:      { min: 0, max: 100, default: 40 }
+
+# Name pools. Phase 3 v1 uses a small pre-modern set. Larger packs
+# can replace this. Surnames are drawn from local settlements.
+names:
+  male:
+    - "Adam"
+    - "Bert"
+    - "Carl"
+    - "David"
+    - "Eric"
+    - "Frank"
+    - "George"
+    - "Henry"
+    - "Ian"
+    - "Jacob"
+    - "Karl"
+    - "Liam"
+    - "Mark"
+    - "Ned"
+    - "Owen"
+    - "Paul"
+  female:
+    - "Alice"
+    - "Beth"
+    - "Carol"
+    - "Diana"
+    - "Eve"
+    - "Fiona"
+    - "Grace"
+    - "Helen"
+    - "Iris"
+    - "Jane"
+    - "Kate"
+    - "Lily"
+    - "Mary"
+    - "Nora"
+    - "Olive"
+    - "Rose"
+  surnames:
+    - "Ashford"
+    - "Brennan"
+    - "Carter"
+    - "Dalton"
+    - "Emerson"
+    - "Fitzroy"
+    - "Galloway"
+    - "Holloway"
+    - "Ingram"
+    - "Jardine"
+    - "Kensington"
+    - "Lockwood"
+
+# Marriage model. In Phase 3 v1, marriages arise only from `propose_marriage`
+# actions. Same-class preference is a soft bias; cross-class is possible.
+marriage:
+  same_class_preference: 0.7  # 70% of marriages are within class
+  min_age_gap: 1
+  max_age_gap: 15
