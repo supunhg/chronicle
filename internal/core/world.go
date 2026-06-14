@@ -53,6 +53,15 @@ type World struct {
 	// a circular import: worldpack already imports core, so core
 	// cannot import worldpack.
 	Rules *WorldRules
+
+	// PlayerID is the ID of the person the player controls.
+	// Empty means "no specific player" — the simulation runs in
+	// world-level mode (the player has no body, so player-scoped
+	// actions like travel are unavailable). Phase 17.5: the
+	// action engine reads this to scope travel and talk. Future
+	// phases may populate it from the CLI (e.g., a `--player`
+	// flag on `chronicle play`).
+	PlayerID string
 }
 
 // WorldRules holds the tunable world rules. Fields are sourced from a

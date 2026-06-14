@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chronicle-dev/chronicle/internal/action"
 	"github.com/chronicle-dev/chronicle/internal/core"
 	"github.com/chronicle-dev/chronicle/internal/intent"
 	"github.com/chronicle-dev/chronicle/internal/llm"
@@ -60,6 +61,8 @@ func newTestWorld() *core.World {
 	w.AddLocation(&core.Location{ID: "ashford", Name: "Ashford", PopulationCap: 50})
 	w.AddPerson(&core.Person{ID: "alice", Name: "Alice", Alive: true, Gender: "F", BirthTick: -20 * 365, LocationID: "blackwater"})
 	w.AddPerson(&core.Person{ID: "bob", Name: "Bob", Alive: true, Gender: "M", BirthTick: -30 * 365, LocationID: "ashford"})
+	w.PlayerID = "alice"
+	w.Tick = 100
 	w.RecomputeLocationPopulations()
 	return w
 }
@@ -393,13 +396,10 @@ func TestREPL_TalkWithNarrator(t *testing.T) {
 	w := newTestWorld()
 	mock := &mockLLM{response: "Alice greets you warmly."}
 	nar := narrator.New(mock, 4)
-	out := runREPL(t, w, "talk alice\nquit\n", Options{Narrator: nar})
+	act := action.New(w, nar)
+	out := runREPL(t, w, "talk alice\nquit\n", Options{Narrator: nar, Action: act})
 	if !strings.Contains(out, "Alice greets you warmly") {
 		t.Errorf("output missing narrator-rendered text: %q", out)
-	}
-	// The stub should NOT appear when the Narrator is in use.
-	if strings.Contains(out, "Narration: Phase 17.4") {
-		t.Errorf("stub should be replaced by Narrator output: %q", out)
 	}
 	if mock.calls != 1 {
 		t.Errorf("LLM calls = %d, want 1", mock.calls)
@@ -412,10 +412,11 @@ func TestREPL_TalkWithNarrator(t *testing.T) {
 // so the LLM is NOT called).
 func TestREPL_TravelWithNarrator(t *testing.T) {
 	w := newTestWorld()
-	mock := &mockLLM{response: "The road to Blackwater stretches before you."}
+	mock := &mockLLM{response: "The road to Ashford stretches before you."}
 	nar := narrator.New(mock, 4)
-	out := runREPL(t, w, "travel blackwater\nquit\n", Options{Narrator: nar})
-	if !strings.Contains(out, "You travel to Blackwater") {
+	act := action.New(w, nar)
+	out := runREPL(t, w, "travel ashford\nquit\n", Options{Narrator: nar, Action: act})
+	if !strings.Contains(out, "You travel to Ashford") {
 		t.Errorf("output missing narrator template text: %q", out)
 	}
 	// Travel is routine — LLM should NOT be called.
@@ -431,7 +432,8 @@ func TestREPL_TalkWithNarrator_Fallback(t *testing.T) {
 	w := newTestWorld()
 	mock := &mockLLM{err: errors.New("llm down")}
 	nar := narrator.New(mock, 4)
-	out := runREPL(t, w, "talk alice\nquit\n", Options{Narrator: nar})
+	act := action.New(w, nar)
+	out := runREPL(t, w, "talk alice\nquit\n", Options{Narrator: nar, Action: act})
 	// Template fallback: "You talk to Alice."
 	if !strings.Contains(out, "You talk to Alice") {
 		t.Errorf("output missing template fallback text: %q", out)

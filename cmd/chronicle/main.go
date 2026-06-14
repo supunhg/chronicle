@@ -51,6 +51,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chronicle-dev/chronicle/internal/action"
 	"github.com/chronicle-dev/chronicle/internal/core"
 	"github.com/chronicle-dev/chronicle/internal/intent"
 	"github.com/chronicle-dev/chronicle/internal/llm"
@@ -923,9 +924,19 @@ func enterREPL(w *core.World) error {
 	// works.
 	nar := narrator.New(llmClient, narrator.DefaultMinTicksBetweenCalls)
 
+	// Action Engine (Phase 17.5): mutates the world in response
+	// to player commands. Delegates text rendering to the
+	// Narrator. The world's PlayerID is the default "alice"
+	// if a worldpack was loaded (the Bootstrap function sets
+	// the first person as the implicit player); for a custom
+	// world, callers can set w.PlayerID before entering the
+	// REPL.
+	act := action.New(w, nar)
+
 	r := repl.New(w, parser, repl.Options{
 		TickFn:   tickFn,
 		Narrator: nar,
+		Action:   act,
 		// In defaults to os.Stdin, Out defaults to os.Stderr.
 	})
 	fmt.Fprintln(os.Stderr, "\nEntering REPL. Type 'quit' or 'exit' to leave, 'help' for a command list.")

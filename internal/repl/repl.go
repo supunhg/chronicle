@@ -10,16 +10,15 @@
 //     affordances for pacing and inspection.
 //  2. Everything else goes through the intent parser
 //     (Phase 17.2). The resulting Intent.Action is
-//     dispatched to a per-action executor.
+//     dispatched to the Action Engine (Phase 17.5), which
+//     mutates the world and returns rendered text.
 //
-// The REPL does NOT execute world mutations. execTravel
-// and execTalk call into the Narrator (Phase 17.4) for
-// text rendering; the actual world mutation (move, time
-// advancement) is Phase 17.5 (Action Engine). Phase 17.4
-// proves the narration wiring: typed commands flow through
-// the parser, the parser's output is dispatched to a
-// per-action executor, the executor calls Narrator.Narrate,
-// and the rendered text is what the player sees.
+// Phase 17.5 wiring: execTalk, execTravel, execSleep, and
+// the read-only verbs delegate to action.Engine.Resolve.
+// The Action Engine is responsible for world mutations
+// (talk creates a memory + trust delta, travel moves the
+// player + advances time, sleep advances time) and text
+// rendering (delegated to the Narrator).
 //
 // Threading: Run is single-threaded. The simulation and
 // the REPL share the world pointer; the REPL never holds
@@ -34,6 +33,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/chronicle-dev/chronicle/internal/action"
 	"github.com/chronicle-dev/chronicle/internal/core"
 	"github.com/chronicle-dev/chronicle/internal/intent"
 	"github.com/chronicle-dev/chronicle/internal/narrator"
@@ -75,6 +75,14 @@ type Options struct {
 	// Constructed by the CLI layer from the resolved LLM
 	// client and the current world.
 	Narrator *narrator.Narrator
+	// Action is the action engine (Phase 17.5) that
+	// mutates the world and renders text for the 12 spec
+	// verbs. Optional: when nil, the REPL falls back to
+	// the Phase 17.3 read-only stubs (no world mutations).
+	// When supplied, execTalk/execTravel/execSleep and the
+	// read-only verbs all delegate to action.Engine.Resolve.
+	// Constructed by the CLI layer from the world + narrator.
+	Action *action.Engine
 }
 
 // REPL is the in-game command loop. Construct via New.
@@ -82,6 +90,7 @@ type REPL struct {
 	world    *core.World
 	parser   *intent.Parser
 	narrator *narrator.Narrator
+	action   *action.Engine
 	in       *bufio.Scanner
 	out      io.Writer
 	playerID string
@@ -106,6 +115,7 @@ func New(w *core.World, parser *intent.Parser, opts Options) *REPL {
 		world:    w,
 		parser:   parser,
 		narrator: opts.Narrator,
+		action:   opts.Action,
 		in:       scanner,
 		out:      out,
 		playerID: opts.PlayerID,
@@ -241,7 +251,13 @@ func (r *REPL) dispatch(in intent.Intent) error {
 }
 
 // execTime prints the current tick and the simulated date.
+// Phase 17.5: delegates to action.Engine.Resolve.
 func (r *REPL) execTime() {
+	if r.action != nil {
+		res, _ := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionTime})
+		fmt.Fprintln(r.out, res.Text)
+		return
+	}
 	fmt.Fprintf(r.out, "Tick %d (%s)\n", r.world.Tick, r.world.Now.Format("2006-01-02"))
 }
 
@@ -270,7 +286,17 @@ func (r *REPL) execPeople() {
 // execLook with no target shows the first location
 // (sorted by ID) and its people. With a target, it looks
 // up a person or location by ID or name (case-insensitive).
+// Phase 17.5: delegates to action.Engine.Resolve.
 func (r *REPL) execLook(target string) {
+	if r.action != nil {
+		res, _ := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionLook, Target: target})
+		if !res.OK {
+			fmt.Fprintln(r.out, res.Text)
+			return
+		}
+		fmt.Fprintln(r.out, res.Text)
+		return
+	}
 	if target == "" {
 		r.execLookLocation("")
 		return
@@ -323,7 +349,17 @@ func (r *REPL) execLookLocation(locationID string) {
 // execInspect shows a single person's full details:
 // status, gender, age, location, occupation, and family
 // links (if present).
+// Phase 17.5: delegates to action.Engine.Resolve.
 func (r *REPL) execInspect(target string) {
+	if r.action != nil {
+		res, _ := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionInspect, Target: target})
+		if !res.OK {
+			fmt.Fprintln(r.out, res.Text)
+			return
+		}
+		fmt.Fprintln(r.out, res.Text)
+		return
+	}
 	p := r.findPerson(target)
 	if p == nil {
 		fmt.Fprintf(r.out, "I don't see %q.\n", target)
@@ -374,65 +410,88 @@ func (r *REPL) printPerson(p *core.Person) {
 }
 
 // execTalk renders narration for talking to a person.
-// If a Narrator is configured, delegates to Narrator.Narrate
-// with EventType=EventTalk; the Narrator decides whether to
-// call the LLM (rate-limited, cached) or fall back to a
-// template. If no Narrator is set, prints a Phase 17.3
-// stub for backwards compatibility.
+// Phase 17.5: delegates to action.Engine.Resolve which
+// creates a memory record, applies a trust delta, and
+// returns rendered text. When no Action engine is set,
+// prints a Phase 17.3 stub for backwards compatibility.
 func (r *REPL) execTalk(target string) {
+	if r.action != nil {
+		res, err := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionTalk, Target: target})
+		if err != nil {
+			fmt.Fprintf(r.out, "error: %v\n", err)
+			return
+		}
+		if !res.OK {
+			fmt.Fprintln(r.out, res.Text)
+			return
+		}
+		fmt.Fprintln(r.out, res.Text)
+		return
+	}
 	p := r.findPerson(target)
 	if p == nil {
 		fmt.Fprintf(r.out, "I don't see %q here.\n", target)
 		return
 	}
-	if r.narrator == nil {
-		fmt.Fprintf(r.out, "You talk to %s.\n", p.Name)
-		return
-	}
-	text := r.narrator.Narrate(context.Background(), r.world, narrator.Event{
-		Type:   narrator.EventTalk,
-		Person: p,
-	})
-	fmt.Fprintln(r.out, text)
+	fmt.Fprintf(r.out, "You talk to %s.\n", p.Name)
 }
 
 // execTravel renders narration for traveling to a location.
-// If a Narrator is configured, delegates to Narrator.Narrate
-// with EventType=EventTravel. If no Narrator is set, prints
-// a Phase 17.3 stub. The actual world mutation (moving the
-// player to the destination) is Phase 17.5.
+// Phase 17.5: delegates to action.Engine.Resolve which
+// moves the player, advances time, and returns rendered
+// text. When no Action engine is set, prints a Phase 17.3
+// stub.
 func (r *REPL) execTravel(target string) {
+	if r.action != nil {
+		res, err := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionTravel, Target: target})
+		if err != nil {
+			fmt.Fprintf(r.out, "error: %v\n", err)
+			return
+		}
+		if !res.OK {
+			fmt.Fprintln(r.out, res.Text)
+			return
+		}
+		fmt.Fprintln(r.out, res.Text)
+		return
+	}
 	l := r.findLocation(target)
 	if l == nil {
 		fmt.Fprintf(r.out, "I don't know the location %q.\n", target)
 		return
 	}
-	if r.narrator == nil {
-		fmt.Fprintf(r.out, "You travel to %s.\n", l.Name)
-		return
-	}
-	text := r.narrator.Narrate(context.Background(), r.world, narrator.Event{
-		Type:     narrator.EventTravel,
-		Location: l,
-	})
-	fmt.Fprintln(r.out, text)
+	fmt.Fprintf(r.out, "You travel to %s.\n", l.Name)
 }
 
 // execInventory is a stub: the player concept (and thus
 // inventory) is added in a later phase. The command is
 // accepted and acknowledged so the parser wiring is
 // exercised.
+// Phase 17.5: delegates to action.Engine.Resolve.
 func (r *REPL) execInventory() {
+	if r.action != nil {
+		res, _ := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionInventory})
+		fmt.Fprintln(r.out, res.Text)
+		return
+	}
 	fmt.Fprintln(r.out, "Inventory: (not yet implemented — Phase 17.4+)")
 }
 
 // execSleep advances the simulation by hours/24 ticks
-// (rounded up to at least 1). A nil TickFn is reported
-// as an error so the CLI layer can surface a clear
-// "REPL was constructed without a tick function" message.
-// Hours is clamped to a week (7*24) to prevent a typo
-// or malicious input from spinning the loop.
+// (rounded up to at least 1). Phase 17.5: delegates to
+// action.Engine.Resolve which advances the world's tick
+// and clock. When no Action engine is set, uses the
+// legacy TickFn path.
 func (r *REPL) execSleep(hours int) {
+	if r.action != nil {
+		res, err := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionSleep, Args: intent.Args{Hours: hours}})
+		if err != nil {
+			fmt.Fprintf(r.out, "error: %v\n", err)
+			return
+		}
+		fmt.Fprintln(r.out, res.Text)
+		return
+	}
 	if hours <= 0 {
 		hours = 8
 	}
@@ -550,4 +609,12 @@ func (r *REPL) findLocation(target string) *core.Location {
 		}
 	}
 	return nil
+}
+
+// ctxTODO returns a fresh background context. Used for
+// action.Engine.Resolve calls that don't need REPL
+// cancellation propagation (Phase 17.5; Phase 18+ can
+// thread the REPL's Run context through).
+func ctxTODO() context.Context {
+	return context.Background()
 }
