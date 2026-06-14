@@ -239,8 +239,26 @@ func (r *REPL) dispatch(in intent.Intent) error {
 	case intent.ActionSleep:
 		r.execSleep(in.Args.Hours)
 	case intent.ActionSave:
-		return r.execSave(in.Target)
+		if r.action != nil {
+			res, err := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionSave, Target: in.Target})
+			if err != nil {
+				fmt.Fprintf(r.out, "error: %v\n", err)
+				return nil
+			}
+			fmt.Fprintln(r.out, res.Text)
+			return nil
+		}
+		return r.execSaveLegacy(in.Target)
 	case intent.ActionBuy, intent.ActionSell:
+		if r.action != nil {
+			res, err := r.action.Resolve(ctxTODO(), intent.Intent{Action: in.Action, Target: in.Target, Args: intent.Args{Quantity: in.Args.Quantity}})
+			if err != nil {
+				fmt.Fprintf(r.out, "error: %v\n", err)
+				return nil
+			}
+			fmt.Fprintln(r.out, res.Text)
+			return nil
+		}
 		fmt.Fprintf(r.out, "%s is not yet implemented (Phase 17.4+).\n", in.Action)
 	case intent.ActionBranch, intent.ActionSwitch:
 		fmt.Fprintf(r.out, "%s is not yet implemented (Phase 17.5+).\n", in.Action)
@@ -515,10 +533,12 @@ func (r *REPL) execSleep(hours int) {
 	fmt.Fprintf(r.out, "You sleep for %d hours. (tick %d)\n", hours, r.world.Tick)
 }
 
-// execSave writes the current world to a SQLite snapshot.
-// If path is empty, defaults to <world-id>.db. Reuses the
-// persistence layer from Phase 12/13.
-func (r *REPL) execSave(path string) error {
+// execSaveLegacy is the Phase 17.3 save path, kept as a
+// fallback when no action engine is configured. Phase
+// 17.6 routes save through action.Engine.Resolve instead;
+// this remains for backwards compatibility with tests that
+// don't supply an action engine.
+func (r *REPL) execSaveLegacy(path string) error {
 	if path == "" {
 		path = r.world.ID + ".db"
 	}

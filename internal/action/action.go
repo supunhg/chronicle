@@ -13,43 +13,45 @@
 //  2. Each action has a handler method (resolveTalk,
 //     resolveTravel, etc.) that knows the action's world-mutation
 //     semantics. Handlers for "look" and "inspect" are read-only;
-//     handlers for "talk" and "travel" mutate state.
+//     handlers for "talk", "travel", "buy", "sell", and "save"
+//     mutate state.
 //
 //  3. The engine delegates text rendering to the Narrator
 //     (Phase 17.4). The engine's job is to decide WHEN to call
 //     the Narrator, WHAT event to pass, and HOW to mutate the
 //     world around that narration.
 //
-//  4. Buy/sell/branch/switch are stubs that return a clear
-//     "not yet implemented" Result. These will be wired in
-//     future phases (commerce, timelines).
+//  4. Branch/switch are stubs that return a clear "not yet
+//     implemented" Result. These will be wired in Phase 19
+//     (timelines).
 //
-// Phase 17.5 scope:
+// Phase 17.6 scope:
 //
-//   - talk: creates a memory record for the conversation,
-//     applies a small TrustDelta to the relationship
-//   - travel: moves the player to the destination, advances
-//     time by 1 tick (a day on the road)
-//   - sleep: advances time by hours/24 ticks (delegates to
-//     the simulation's Tick)
-//   - look/inspect/time/inventory: read-only, no world changes
-//   - save/branch/switch/buy/sell: stubs
+//   - save: writes the world to a SQLite snapshot via the
+//     persistence layer; default path is <world-id>.db
+//   - buy: increases the player's inventory, decreases Coin
+//   - sell: decreases the player's inventory, increases Coin
+//   - inventory: now reads the player's actual inventory
+//     (was a "You have nothing." stub)
 //
-// The engine does NOT call the simulation's Tick directly —
-// it mutates the world directly and returns a "ticks advanced"
-// count so the caller (the REPL) can update the world's
-// Tick counter consistently. This keeps the engine testable
-// without a full *tick.Simulation.
+// Economy v1 (Phase 17.6): a fixed price list for common
+// goods. Phase 18+ will read prices from the worldpack's
+// EconomySpec. The buy/sell handlers are intentionally
+// simple — they validate the transaction, mutate Coin and
+// Inventory, and return a result. No price discovery, no
+// merchant NPCs, no negotiation.
 package action
 
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/chronicle-dev/chronicle/internal/core"
 	"github.com/chronicle-dev/chronicle/internal/intent"
 	"github.com/chronicle-dev/chronicle/internal/narrator"
+	"github.com/chronicle-dev/chronicle/internal/persistence"
 )
 
 // Result is the outcome of resolving an Intent. The REPL
@@ -123,9 +125,11 @@ func (e *Engine) Resolve(ctx context.Context, in intent.Intent) (Result, error) 
 	case intent.ActionSleep:
 		return e.resolveSleep(in.Args.Hours), nil
 	case intent.ActionSave:
-		return Result{OK: false, Text: "save is not yet implemented (Phase 17.6+)"}, nil
-	case intent.ActionBuy, intent.ActionSell:
-		return Result{OK: false, Text: fmt.Sprintf("%s is not yet implemented (Phase 18+)", in.Action)}, nil
+		return e.resolveSave(in.Target), nil
+	case intent.ActionBuy:
+		return e.resolveBuy(in.Target, in.Args.Quantity), nil
+	case intent.ActionSell:
+		return e.resolveSell(in.Target, in.Args.Quantity), nil
 	case intent.ActionBranch, intent.ActionSwitch:
 		return Result{OK: false, Text: fmt.Sprintf("%s is not yet implemented (Phase 19+)", in.Action)}, nil
 	default:
@@ -172,12 +176,27 @@ func (e *Engine) resolveTime() Result {
 	}
 }
 
-// resolveInventory is a stub. The player concept (and thus
-// inventory) is added in a later phase. The command is
-// accepted and acknowledged so the parser wiring is
-// exercised.
+// resolveInventory shows the player's current inventory
+// and coin balance. Phase 17.6: reads from the world's
+// Inventory map and Coin field. Phase 18+ may add
+// per-person inventories (the current model is player-
+// only).
 func (e *Engine) resolveInventory() Result {
-	return Result{OK: true, Text: "You have nothing."}
+	if len(e.world.Inventory) == 0 {
+		return Result{OK: true, Text: fmt.Sprintf("You have nothing. (Coin: %d)", e.world.Coin)}
+	}
+	// Sort items by name for deterministic output.
+	names := make([]string, 0, len(e.world.Inventory))
+	for name := range e.world.Inventory {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are carrying (Coin: %d):\n", e.world.Coin)
+	for _, name := range names {
+		fmt.Fprintf(&b, "  %s x%d\n", name, e.world.Inventory[name])
+	}
+	return Result{OK: true, Text: b.String()}
 }
 
 // resolveTalk handles "talk <name>" — creates a memory
@@ -295,6 +314,97 @@ func (e *Engine) resolveSleep(hours int) Result {
 		Text:          fmt.Sprintf("You sleep for %d hours. (tick %d)", hours, e.world.Tick),
 		TicksAdvanced: ticks,
 	}
+}
+
+// resolveSave handles "save [path]" — writes the current
+// world to a SQLite snapshot via the persistence layer.
+// If path is empty, defaults to <world-id>.db. The
+// snapshot is a full world dump (people, locations,
+// relationships, memories, rules) that can be restored
+// with `chronicle resume <path>`.
+//
+// Save does not advance time (it's a disk operation, not
+// a simulation step). The Result.Text is "Saved to <path>."
+// on success, or an error message on failure.
+func (e *Engine) resolveSave(path string) Result {
+	if path == "" {
+		path = e.world.ID + ".db"
+	}
+	db, err := persistence.Open(path)
+	if err != nil {
+		return Result{OK: false, Text: fmt.Sprintf("save: open %s: %v", path, err)}
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		return Result{OK: false, Text: fmt.Sprintf("save: migrate: %v", err)}
+	}
+	if err := db.Snapshot(e.world); err != nil {
+		return Result{OK: false, Text: fmt.Sprintf("save: snapshot: %v", err)}
+	}
+	return Result{OK: true, Text: fmt.Sprintf("Saved to %s.", path)}
+}
+
+// resolveBuy handles "buy <item> [quantity]" — adds items
+// to the player's inventory and deducts Coin. Phase 17.6
+// uses a fixed price list (priceList). Phase 18+ will
+// read prices from the worldpack's EconomySpec.
+//
+// Quantity defaults to 1 when 0 or negative. The buy is
+// rejected if the player can't afford it.
+func (e *Engine) resolveBuy(item string, quantity int) Result {
+	if item == "" {
+		return Result{OK: false, Text: "Buy what?"}
+	}
+	player := e.player()
+	if player == nil {
+		return Result{OK: false, Text: "You need a player character to buy. (Set Options.PlayerID.)"}
+	}
+	if quantity <= 0 {
+		quantity = 1
+	}
+	price, ok := priceList[strings.ToLower(item)]
+	if !ok {
+		return Result{OK: false, Text: fmt.Sprintf("I don't know the price of %q.", item)}
+	}
+	cost := price * quantity
+	if e.world.Coin < cost {
+		return Result{OK: false, Text: fmt.Sprintf("You can't afford %d %s (%d coin); you only have %d.", quantity, item, cost, e.world.Coin)}
+	}
+	e.world.Coin -= cost
+	e.world.Inventory[item] = e.world.Inventory[item] + quantity
+	return Result{OK: true, Text: fmt.Sprintf("You buy %d %s for %d coin. (Coin: %d)", quantity, item, cost, e.world.Coin)}
+}
+
+// resolveSell handles "sell <item> [quantity]" — removes
+// items from the player's inventory and adds Coin. Uses
+// the same priceList as buy. The sell is rejected if the
+// player doesn't have the item (or enough of it).
+func (e *Engine) resolveSell(item string, quantity int) Result {
+	if item == "" {
+		return Result{OK: false, Text: "Sell what?"}
+	}
+	player := e.player()
+	if player == nil {
+		return Result{OK: false, Text: "You need a player character to sell. (Set Options.PlayerID.)"}
+	}
+	if quantity <= 0 {
+		quantity = 1
+	}
+	price, ok := priceList[strings.ToLower(item)]
+	if !ok {
+		return Result{OK: false, Text: fmt.Sprintf("I don't know the price of %q.", item)}
+	}
+	have := e.world.Inventory[item]
+	if have < quantity {
+		return Result{OK: false, Text: fmt.Sprintf("You only have %d %s; can't sell %d.", have, item, quantity)}
+	}
+	value := price * quantity
+	e.world.Coin += value
+	e.world.Inventory[item] = have - quantity
+	if e.world.Inventory[item] == 0 {
+		delete(e.world.Inventory, item)
+	}
+	return Result{OK: true, Text: fmt.Sprintf("You sell %d %s for %d coin. (Coin: %d)", quantity, item, value, e.world.Coin)}
 }
 
 // lookPerson renders a person's details. Delegates to the
@@ -482,4 +592,23 @@ func locationNameOrID(w *core.World, id string) string {
 // Wrapped in a function for symmetry with future fields.
 func playerID(w *core.World) string {
 	return w.PlayerID
+}
+
+// priceList is the Phase 17.6 v1 price table for common
+// goods. Prices are in coin per unit. Phase 18+ will read
+// this from the worldpack's EconomySpec. Lookup is
+// case-insensitive (lowercased before lookup).
+var priceList = map[string]int{
+	"bread":  3,
+	"ale":    2,
+	"meat":   8,
+	"apple":  1,
+	"cheese": 5,
+	"rope":   4,
+	"torch":  2,
+	"bed":    15,
+	"sword":  50,
+	"shield": 35,
+	"potion": 20,
+	"book":   10,
 }

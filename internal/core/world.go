@@ -62,6 +62,18 @@ type World struct {
 	// phases may populate it from the CLI (e.g., a `--player`
 	// flag on `chronicle play`).
 	PlayerID string
+
+	// Inventory is the player's owned items (keyed by item
+	// name). Phase 17.6: a simple name→count map. The buy/sell
+	// handlers in the action engine read and mutate this.
+	// Phase 18+ may promote it to a typed Item struct (with
+	// weight, value, durability) and per-person inventories.
+	Inventory map[string]int
+
+	// Coin is the player's money. Phase 17.6: a simple integer
+	// counter. Buy reduces Coin; sell increases it. Phase 18+
+	// may add inflation, debt, and per-faction currencies.
+	Coin int
 }
 
 // WorldRules holds the tunable world rules. Fields are sourced from a
@@ -110,6 +122,7 @@ func NewWorld(id string, seed int64, start time.Time) *World {
 		Factions:      make(map[string]*Faction),
 		Relationships: []Relationship{},
 		Memories:      []Memory{},
+		Inventory:     make(map[string]int),
 	}
 }
 

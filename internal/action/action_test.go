@@ -2,12 +2,15 @@ package action
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/chronicle-dev/chronicle/internal/core"
 	"github.com/chronicle-dev/chronicle/internal/intent"
+	"github.com/chronicle-dev/chronicle/internal/persistence"
 )
 
 // newTestWorld builds a small world with 2 people and 2
@@ -350,4 +353,231 @@ func TestApplyTalkDelta_ExistingRelationship(t *testing.T) {
 		}
 	}
 	t.Errorf("alice→bob relationship not found")
+}
+
+// TestResolve_Save verifies that save writes a valid SQLite
+// snapshot that can be restored.
+func TestResolve_Save(t *testing.T) {
+	w := newTestWorld()
+	w.Coin = 42
+	w.Inventory["bread"] = 3
+	eng := New(w, nil)
+	path := filepath.Join(t.TempDir(), "save.db")
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSave, Target: path})
+	if !res.OK {
+		t.Fatalf("save: OK = false; Text = %q", res.Text)
+	}
+	if !strings.Contains(res.Text, "Saved to "+path) {
+		t.Errorf("save output missing 'Saved to %s': %q", path, res.Text)
+	}
+	// Verify the file exists and is non-empty.
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if info.Size() == 0 {
+		t.Errorf("save produced empty file at %s", path)
+	}
+	// Verify it can be opened and migrated.
+	db, err := persistence.Open(path)
+	if err != nil {
+		t.Fatalf("reopen %s: %v", path, err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		t.Errorf("reopen migrate: %v", err)
+	}
+}
+
+// TestResolve_SaveDefaultPath verifies that bare "save"
+// defaults to <world-id>.db.
+func TestResolve_SaveDefaultPath(t *testing.T) {
+	w := newTestWorld()
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSave})
+	if !res.OK {
+		t.Fatalf("save default: OK = false; Text = %q", res.Text)
+	}
+	if !strings.Contains(res.Text, "test.db") {
+		t.Errorf("save default output missing 'test.db': %q", res.Text)
+	}
+}
+
+// TestResolve_SaveBadPath verifies that save to a bad
+// path returns OK=false.
+func TestResolve_SaveBadPath(t *testing.T) {
+	w := newTestWorld()
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSave, Target: "/nonexistent/dir/save.db"})
+	if res.OK {
+		t.Errorf("save bad path: OK = true, want false; Text = %q", res.Text)
+	}
+	if !strings.Contains(res.Text, "save:") {
+		t.Errorf("save bad path output missing 'save:' error prefix: %q", res.Text)
+	}
+}
+
+// TestResolve_Buy verifies that buy deducts Coin and adds
+// to Inventory.
+func TestResolve_Buy(t *testing.T) {
+	w := newTestWorld()
+	w.Coin = 100
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionBuy, Target: "bread", Args: intent.Args{Quantity: 2}})
+	if !res.OK {
+		t.Fatalf("buy bread: OK = false; Text = %q", res.Text)
+	}
+	if w.Coin != 94 { // 100 - 2*3 = 94
+		t.Errorf("Coin after buy = %d, want 94", w.Coin)
+	}
+	if w.Inventory["bread"] != 2 {
+		t.Errorf("Inventory[bread] = %d, want 2", w.Inventory["bread"])
+	}
+	if !strings.Contains(res.Text, "94") {
+		t.Errorf("buy output missing new coin balance '94': %q", res.Text)
+	}
+}
+
+// TestResolve_BuyDefaultQuantity verifies that buy with
+// no quantity defaults to 1.
+func TestResolve_BuyDefaultQuantity(t *testing.T) {
+	w := newTestWorld()
+	w.Coin = 10
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionBuy, Target: "apple"})
+	if !res.OK {
+		t.Fatalf("buy apple: OK = false; Text = %q", res.Text)
+	}
+	if w.Coin != 9 { // 10 - 1*1 = 9
+		t.Errorf("Coin after buy = %d, want 9", w.Coin)
+	}
+	if w.Inventory["apple"] != 1 {
+		t.Errorf("Inventory[apple] = %d, want 1", w.Inventory["apple"])
+	}
+}
+
+// TestResolve_BuyInsufficientFunds verifies that buy is
+// rejected when the player can't afford it.
+func TestResolve_BuyInsufficientFunds(t *testing.T) {
+	w := newTestWorld()
+	w.Coin = 1
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionBuy, Target: "sword"})
+	if res.OK {
+		t.Errorf("buy sword with 1 coin: OK = true, want false")
+	}
+	if !strings.Contains(res.Text, "afford") {
+		t.Errorf("buy insufficient output missing 'afford': %q", res.Text)
+	}
+}
+
+// TestResolve_BuyUnknownItem verifies that buy of an
+// unknown item is rejected.
+func TestResolve_BuyUnknownItem(t *testing.T) {
+	w := newTestWorld()
+	w.Coin = 100
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionBuy, Target: "unicorn"})
+	if res.OK {
+		t.Errorf("buy unicorn: OK = true, want false")
+	}
+	if !strings.Contains(res.Text, "price") {
+		t.Errorf("buy unknown output missing 'price': %q", res.Text)
+	}
+}
+
+// TestResolve_Sell verifies that sell adds Coin and removes
+// from Inventory.
+func TestResolve_Sell(t *testing.T) {
+	w := newTestWorld()
+	w.Coin = 0
+	w.Inventory["bread"] = 3
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSell, Target: "bread", Args: intent.Args{Quantity: 2}})
+	if !res.OK {
+		t.Fatalf("sell bread: OK = false; Text = %q", res.Text)
+	}
+	if w.Coin != 6 { // 0 + 2*3 = 6
+		t.Errorf("Coin after sell = %d, want 6", w.Coin)
+	}
+	if w.Inventory["bread"] != 1 {
+		t.Errorf("Inventory[bread] = %d, want 1", w.Inventory["bread"])
+	}
+}
+
+// TestResolve_SellRemovesEmptyEntry verifies that selling
+// the last of an item removes the inventory entry.
+func TestResolve_SellRemovesEmptyEntry(t *testing.T) {
+	w := newTestWorld()
+	w.Coin = 0
+	w.Inventory["apple"] = 1
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSell, Target: "apple"})
+	if !res.OK {
+		t.Fatalf("sell apple: OK = false; Text = %q", res.Text)
+	}
+	if _, exists := w.Inventory["apple"]; exists {
+		t.Errorf("Inventory[apple] still exists after selling last one")
+	}
+}
+
+// TestResolve_SellInsufficientInventory verifies that sell
+// is rejected when the player doesn't have enough.
+func TestResolve_SellInsufficientInventory(t *testing.T) {
+	w := newTestWorld()
+	w.Coin = 0
+	w.Inventory["bread"] = 1
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSell, Target: "bread", Args: intent.Args{Quantity: 5}})
+	if res.OK {
+		t.Errorf("sell 5 bread with 1: OK = true, want false")
+	}
+	if !strings.Contains(res.Text, "only have") {
+		t.Errorf("sell insufficient output missing 'only have': %q", res.Text)
+	}
+}
+
+// TestResolve_Inventory_Empty verifies that the inventory
+// stub returns a clear "nothing" message when empty.
+func TestResolve_Inventory_Empty(t *testing.T) {
+	w := newTestWorld()
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionInventory})
+	if !res.OK {
+		t.Errorf("inventory: OK = false")
+	}
+	if !strings.Contains(res.Text, "nothing") {
+		t.Errorf("empty inventory output missing 'nothing': %q", res.Text)
+	}
+	if !strings.Contains(res.Text, "Coin: 0") {
+		t.Errorf("empty inventory output missing 'Coin: 0': %q", res.Text)
+	}
+}
+
+// TestResolve_Inventory_WithItems verifies that the
+// inventory shows items sorted by name with counts.
+func TestResolve_Inventory_WithItems(t *testing.T) {
+	w := newTestWorld()
+	w.Coin = 42
+	w.Inventory["sword"] = 1
+	w.Inventory["bread"] = 3
+	w.Inventory["apple"] = 5
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionInventory})
+	if !res.OK {
+		t.Errorf("inventory: OK = false")
+	}
+	// Items should be sorted: apple, bread, sword.
+	if !strings.Contains(res.Text, "apple x5") {
+		t.Errorf("inventory output missing 'apple x5': %q", res.Text)
+	}
+	if !strings.Contains(res.Text, "bread x3") {
+		t.Errorf("inventory output missing 'bread x3': %q", res.Text)
+	}
+	if !strings.Contains(res.Text, "sword x1") {
+		t.Errorf("inventory output missing 'sword x1': %q", res.Text)
+	}
+	if !strings.Contains(res.Text, "Coin: 42") {
+		t.Errorf("inventory output missing 'Coin: 42': %q", res.Text)
+	}
 }
