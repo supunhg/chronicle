@@ -1,6 +1,7 @@
-# Build output
-chronicle
-chronicle.exe
+# Build output (anchored to repo root so the cmd/chronicle source
+# directory is not accidentally ignored).
+/chronicle
+/chronicle.exe
 *.exe
 
 # SQLite artifacts (test runs, local saves)
