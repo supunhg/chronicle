@@ -13,12 +13,13 @@
 //     dispatched to a per-action executor.
 //
 // The REPL does NOT execute world mutations. execTravel
-// and execTalk print stub messages; the real action
-// resolution is Phase 17.4 (Narrator LLM) and Phase 17.5
-// (Action Engine). Phase 17.3 proves the wiring: typed
-// commands flow through the parser, the parser's output
-// is dispatched, and the simulation can be advanced by
-// hand or auto-ticked.
+// and execTalk call into the Narrator (Phase 17.4) for
+// text rendering; the actual world mutation (move, time
+// advancement) is Phase 17.5 (Action Engine). Phase 17.4
+// proves the narration wiring: typed commands flow through
+// the parser, the parser's output is dispatched to a
+// per-action executor, the executor calls Narrator.Narrate,
+// and the rendered text is what the player sees.
 //
 // Threading: Run is single-threaded. The simulation and
 // the REPL share the world pointer; the REPL never holds
@@ -35,6 +36,7 @@ import (
 
 	"github.com/chronicle-dev/chronicle/internal/core"
 	"github.com/chronicle-dev/chronicle/internal/intent"
+	"github.com/chronicle-dev/chronicle/internal/narrator"
 	"github.com/chronicle-dev/chronicle/internal/persistence"
 )
 
@@ -64,12 +66,22 @@ type Options struct {
 	// tick. Constructed by the CLI layer from a
 	// *tick.Simulation.
 	TickFn func() error
+	// Narrator renders narrative text for execTalk and
+	// execTravel. Optional: when nil, the REPL prints
+	// a short stub ("You talk to X" / "You travel to Y")
+	// for backwards compatibility with Phase 17.3
+	// callers. When supplied, the executor delegates to
+	// Narrator.Narrate and prints the rendered text.
+	// Constructed by the CLI layer from the resolved LLM
+	// client and the current world.
+	Narrator *narrator.Narrator
 }
 
 // REPL is the in-game command loop. Construct via New.
 type REPL struct {
 	world    *core.World
 	parser   *intent.Parser
+	narrator *narrator.Narrator
 	in       *bufio.Scanner
 	out      io.Writer
 	playerID string
@@ -93,6 +105,7 @@ func New(w *core.World, parser *intent.Parser, opts Options) *REPL {
 	return &REPL{
 		world:    w,
 		parser:   parser,
+		narrator: opts.Narrator,
 		in:       scanner,
 		out:      out,
 		playerID: opts.PlayerID,
@@ -360,29 +373,49 @@ func (r *REPL) printPerson(p *core.Person) {
 	}
 }
 
-// execTalk is a Phase 17.3 stub: it confirms the target
-// exists and prints a placeholder. The Narrator LLM
-// (Phase 17.4) will replace this with generated dialogue.
+// execTalk renders narration for talking to a person.
+// If a Narrator is configured, delegates to Narrator.Narrate
+// with EventType=EventTalk; the Narrator decides whether to
+// call the LLM (rate-limited, cached) or fall back to a
+// template. If no Narrator is set, prints a Phase 17.3
+// stub for backwards compatibility.
 func (r *REPL) execTalk(target string) {
 	p := r.findPerson(target)
 	if p == nil {
 		fmt.Fprintf(r.out, "I don't see %q here.\n", target)
 		return
 	}
-	fmt.Fprintf(r.out, "You talk to %s. (Narration: Phase 17.4)\n", p.Name)
+	if r.narrator == nil {
+		fmt.Fprintf(r.out, "You talk to %s.\n", p.Name)
+		return
+	}
+	text := r.narrator.Narrate(context.Background(), r.world, narrator.Event{
+		Type:   narrator.EventTalk,
+		Person: p,
+	})
+	fmt.Fprintln(r.out, text)
 }
 
-// execTravel is a Phase 17.3 stub: it confirms the
-// location exists and prints a placeholder. The action
-// engine (Phase 17.5) will replace this with actual
-// movement and time advancement.
+// execTravel renders narration for traveling to a location.
+// If a Narrator is configured, delegates to Narrator.Narrate
+// with EventType=EventTravel. If no Narrator is set, prints
+// a Phase 17.3 stub. The actual world mutation (moving the
+// player to the destination) is Phase 17.5.
 func (r *REPL) execTravel(target string) {
 	l := r.findLocation(target)
 	if l == nil {
 		fmt.Fprintf(r.out, "I don't know the location %q.\n", target)
 		return
 	}
-	fmt.Fprintf(r.out, "You travel to %s. (Movement: Phase 17.4)\n", l.Name)
+	if r.narrator == nil {
+		fmt.Fprintf(r.out, "You travel to %s.\n", l.Name)
+		return
+	}
+	text := r.narrator.Narrate(context.Background(), r.world, narrator.Event{
+		Type:     narrator.EventTravel,
+		Location: l,
+	})
+	fmt.Fprintln(r.out, text)
 }
 
 // execInventory is a stub: the player concept (and thus

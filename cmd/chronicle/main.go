@@ -54,6 +54,7 @@ import (
 	"github.com/chronicle-dev/chronicle/internal/core"
 	"github.com/chronicle-dev/chronicle/internal/intent"
 	"github.com/chronicle-dev/chronicle/internal/llm"
+	"github.com/chronicle-dev/chronicle/internal/narrator"
 	"github.com/chronicle-dev/chronicle/internal/persistence"
 	"github.com/chronicle-dev/chronicle/internal/repl"
 	"github.com/chronicle-dev/chronicle/internal/simulation"
@@ -914,8 +915,17 @@ func enterREPL(w *core.World) error {
 	}
 	tickFn := func() error { return sim.Tick(w) }
 
+	// Narrator (Phase 17.4): renders narrative text for execTalk
+	// and execTravel. The LLM client is the same one used by
+	// the intent parser — shared config, shared rate limits (in
+	// a future phase). If the API key is empty, the Narrator
+	// will silently fall back to templates; the REPL still
+	// works.
+	nar := narrator.New(llmClient, narrator.DefaultMinTicksBetweenCalls)
+
 	r := repl.New(w, parser, repl.Options{
-		TickFn: tickFn,
+		TickFn:   tickFn,
+		Narrator: nar,
 		// In defaults to os.Stdin, Out defaults to os.Stderr.
 	})
 	fmt.Fprintln(os.Stderr, "\nEntering REPL. Type 'quit' or 'exit' to leave, 'help' for a command list.")

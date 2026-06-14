@@ -12,7 +12,25 @@ import (
 
 	"github.com/chronicle-dev/chronicle/internal/core"
 	"github.com/chronicle-dev/chronicle/internal/intent"
+	"github.com/chronicle-dev/chronicle/internal/llm"
+	"github.com/chronicle-dev/chronicle/internal/narrator"
 )
+
+// mockLLM is a hand-rolled fake of the narrator's
+// LLMClient interface. Returns a canned response (or
+// error) from Chat, with a record of how many times it
+// was called. Used to assert the Narrator is wired into
+// execTalk/execTravel and that the LLM is called.
+type mockLLM struct {
+	response string
+	err      error
+	calls    int
+}
+
+func (m *mockLLM) Chat(ctx context.Context, messages []llm.ChatMessage) (string, error) {
+	m.calls++
+	return m.response, m.err
+}
 
 // mockTick records how many times it was called and
 // increments the world's tick counter (mirroring the
@@ -365,6 +383,58 @@ func TestREPL_Travel(t *testing.T) {
 	out = runREPL(t, w, "travel nowhere\nquit\n", Options{})
 	if !strings.Contains(out, "I don't know the location") {
 		t.Errorf("output missing 'I don't know the location': %q", out)
+	}
+}
+
+// TestREPL_TalkWithNarrator verifies that when a Narrator
+// is configured, "talk <name>" delegates to it and prints
+// the rendered text instead of the stub.
+func TestREPL_TalkWithNarrator(t *testing.T) {
+	w := newTestWorld()
+	mock := &mockLLM{response: "Alice greets you warmly."}
+	nar := narrator.New(mock, 4)
+	out := runREPL(t, w, "talk alice\nquit\n", Options{Narrator: nar})
+	if !strings.Contains(out, "Alice greets you warmly") {
+		t.Errorf("output missing narrator-rendered text: %q", out)
+	}
+	// The stub should NOT appear when the Narrator is in use.
+	if strings.Contains(out, "Narration: Phase 17.4") {
+		t.Errorf("stub should be replaced by Narrator output: %q", out)
+	}
+	if mock.calls != 1 {
+		t.Errorf("LLM calls = %d, want 1", mock.calls)
+	}
+}
+
+// TestREPL_TravelWithNarrator verifies that when a Narrator
+// is configured, "travel <location>" delegates to it and
+// prints the template-rendered text (travel is routine,
+// so the LLM is NOT called).
+func TestREPL_TravelWithNarrator(t *testing.T) {
+	w := newTestWorld()
+	mock := &mockLLM{response: "The road to Blackwater stretches before you."}
+	nar := narrator.New(mock, 4)
+	out := runREPL(t, w, "travel blackwater\nquit\n", Options{Narrator: nar})
+	if !strings.Contains(out, "You travel to Blackwater") {
+		t.Errorf("output missing narrator template text: %q", out)
+	}
+	// Travel is routine — LLM should NOT be called.
+	if mock.calls != 0 {
+		t.Errorf("LLM calls = %d, want 0 (travel is routine)", mock.calls)
+	}
+}
+
+// TestREPL_TalkWithNarrator_Fallback verifies that when the
+// Narrator's LLM errors out, the REPL still prints something
+// (the template fallback).
+func TestREPL_TalkWithNarrator_Fallback(t *testing.T) {
+	w := newTestWorld()
+	mock := &mockLLM{err: errors.New("llm down")}
+	nar := narrator.New(mock, 4)
+	out := runREPL(t, w, "talk alice\nquit\n", Options{Narrator: nar})
+	// Template fallback: "You talk to Alice."
+	if !strings.Contains(out, "You talk to Alice") {
+		t.Errorf("output missing template fallback text: %q", out)
 	}
 }
 
