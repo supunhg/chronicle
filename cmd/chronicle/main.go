@@ -1,12 +1,20 @@
 // Command chronicle is the entry point for the Chronicle simulation engine.
 //
-// Phase 17.1: six subcommands (added `doctor`), plus a save-time auto-resume hook.
+// Phase 17.3: in-game REPL available via `-repl` on play/resume.
 //// chronicle [play-flags]              - default; load a worldpack, bootstrap, simulate
 //	chronicle save [flags]              - play + snapshot the post-tick world to a SQLite DB
 //	chronicle resume <db-path> [-ticks] - restore from a SQLite snapshot, simulate more
 //	chronicle info <db-path>            - print snapshot metadata (no ticks run)
 //	chronicle diff <db1> <db2>          - compare two snapshots (metadata, rules, people, social)
 //	chronicle doctor                    - check OPENCODE_ZEN_API_KEY and endpoint reachability
+//
+// The play and resume subcommands accept a `-repl` flag that
+// drops the user into an in-game REPL (Phase 17.3) after the
+// initial ticks. The REPL accepts commands like `time`, `look`,
+// `talk alice`, `advance day`, `auto-tick on`, and `quit`.
+// Typed commands are dispatched through the intent parser
+// (Phase 17.2); the REPL just executes the resulting Intent
+// against the current World.
 //
 // The save subcommand accepts two flags that wire a death-detection
 // hook into the play workflow:
@@ -44,8 +52,10 @@ import (
 	"time"
 
 	"github.com/chronicle-dev/chronicle/internal/core"
+	"github.com/chronicle-dev/chronicle/internal/intent"
 	"github.com/chronicle-dev/chronicle/internal/llm"
 	"github.com/chronicle-dev/chronicle/internal/persistence"
+	"github.com/chronicle-dev/chronicle/internal/repl"
 	"github.com/chronicle-dev/chronicle/internal/simulation"
 	"github.com/chronicle-dev/chronicle/internal/tick"
 	"github.com/chronicle-dev/chronicle/internal/worldpack"
@@ -104,6 +114,7 @@ func runPlayCmd(args []string) error {
 	packDir := fs.String("pack", "worldpacks/frontier", "Path to worldpack directory containing the six YAML files")
 	ticks := fs.Int("ticks", 100, "Number of ticks to run (1 tick = 1 simulated day)")
 	seed := fs.Int64("seed", 12345, "World seed for deterministic RNG")
+	replFlag := fs.Bool("repl", false, "If set, drop into the in-game REPL after the initial ticks")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -113,6 +124,9 @@ func runPlayCmd(args []string) error {
 		return err
 	}
 	printSummary(w, "Final state")
+	if *replFlag {
+		return enterREPL(w)
+	}
 	return nil
 }
 
@@ -837,6 +851,7 @@ func maskAPIKey(key string) string {
 func runResumeCmd(args []string) error {
 	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
 	ticks := fs.Int("ticks", 100, "Number of ticks to run after resuming")
+	replFlag := fs.Bool("repl", false, "If set, drop into the in-game REPL after the resumed ticks")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -846,10 +861,65 @@ func runResumeCmd(args []string) error {
 		return fmt.Errorf("usage: chronicle resume <db-path> [-ticks N]")
 	}
 	dbPath := positional[0]
-	if _, err := runResume(dbPath, *ticks); err != nil {
+	w, err := runResume(dbPath, *ticks)
+	if err != nil {
 		return err
 	}
+	if *replFlag {
+		return enterREPL(w)
+	}
 	return nil
+}
+
+// enterREPL constructs and runs the in-game REPL on the given
+// world. It creates a fresh *tick.Simulation (whose engines
+// operate on the same world) and an *intent.Parser (with the
+// LLM client configured from env/yaml/defaults), then drops
+// the user into the REPL prompt loop. Blocks until the user
+// types `quit`, `exit`, or EOFs stdin.
+//
+// The simulation created here is independent of any simulation
+// used by the caller (e.g., the one that ran the initial ticks
+// in runPlay/runResume). Both simulations operate on the same
+// world — the engines are stateless readers/writers of world
+// state, so the second simulation picks up exactly where the
+// first left off.
+func enterREPL(w *core.World) error {
+	// LLM client: env > yaml > default. If the API key is empty,
+	// the LLM fallback will fail with a clear error; the rule
+	// parser still works.
+	llmCfg, _ := llm.LoadConfig("")
+	llmClient := llm.NewClient(
+		llm.WithEndpoint(llmCfg.Endpoint),
+		llm.WithAPIKey(llmCfg.APIKey),
+		llm.WithModel(llmCfg.Model),
+		llm.WithTimeout(llmCfg.Timeout),
+	)
+	parser := intent.New(llmClient, w)
+
+	// Fresh simulation. The engines are stateless; both this
+	// sim and the one that ran the initial ticks read from and
+	// write to the same world.
+	popEng := simulation.NewPopulationEngine()
+	relEng := simulation.NewRelationshipEngine()
+	memEng := &simulation.MemoryEngine{RelationshipEngine: relEng}
+	sim := tick.NewSimulation(w.Seed,
+		popEng,
+		relEng,
+		simulation.NewGoalEngine(),
+		memEng,
+	)
+	if err := sim.Init(w); err != nil {
+		return fmt.Errorf("repl: sim init: %w", err)
+	}
+	tickFn := func() error { return sim.Tick(w) }
+
+	r := repl.New(w, parser, repl.Options{
+		TickFn: tickFn,
+		// In defaults to os.Stdin, Out defaults to os.Stderr.
+	})
+	fmt.Fprintln(os.Stderr, "\nEntering REPL. Type 'quit' or 'exit' to leave, 'help' for a command list.")
+	return r.Run(context.Background())
 }
 
 // runResume is the testable core of the resume subcommand. It opens

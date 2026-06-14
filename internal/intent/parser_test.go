@@ -58,7 +58,10 @@ func TestParser_Rule_Look(t *testing.T) {
 		{"look alice", ActionLook, "alice"},
 		{"look at alice", ActionLook, "alice"},
 		{"LOOK", ActionLook, ""},
-		{"Look At Alice", ActionLook, "alice"},
+		// "Look At Alice" — verb is lowercased for matching,
+		// the "At" preposition is stripped (case-insensitive),
+		// and the target "Alice" keeps its original case.
+		{"Look At Alice", ActionLook, "Alice"},
 	}
 	for _, c := range cases {
 		got, err := p.Parse(context.Background(), c.in)

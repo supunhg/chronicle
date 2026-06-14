@@ -379,12 +379,26 @@ func validateLLMResponse(raw string) (validatedIntent, error) {
 	return v, nil
 }
 
-// tokenize splits raw on whitespace and lowercases. The
-// rule parser is case-insensitive; the LLM fallback is
-// case-sensitive (the LLM sees the original casing in the
-// user message).
+// tokenize splits raw on whitespace and lowercases ONLY
+// the first token (the verb) for case-insensitive matching.
+// The remaining tokens keep their original case so targets
+// like file paths and proper nouns are preserved. The LLM
+// fallback is unaffected — it receives the original raw
+// input in the user message.
+//
+// Why this matters: lowercasing the whole input would
+// mangle file paths in the `save` command (e.g.,
+// `/tmp/TestREPL_Save/001/test.db` → `/tmp/testrepl_save/
+// 001/test.db`, which doesn't exist on case-sensitive
+// filesystems). It would also mangle proper-noun targets
+// like "Alice" → "alice", which is fine for case-insensitive
+// lookups but loses information the LLM might want.
 func tokenize(raw string) []string {
-	fields := strings.Fields(strings.ToLower(raw))
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		return fields
+	}
+	fields[0] = strings.ToLower(fields[0])
 	return fields
 }
 
@@ -392,11 +406,16 @@ func tokenize(raw string) []string {
 // rest. If the first token matches one of the prepositions
 // (case-insensitive), it's dropped and the remaining tokens
 // are joined with spaces. Returns "" if nothing remains.
+//
+// Case-insensitive because the rule parser preserves the
+// original case of the target tokens (only the verb is
+// lowercased). "look At Alice" and "look at Alice" should
+// both strip the "at".
 func stripPreposition(rest []string, prepositions ...string) string {
 	if len(rest) == 0 {
 		return ""
 	}
-	first := rest[0]
+	first := strings.ToLower(rest[0])
 	for _, prep := range prepositions {
 		if first == prep {
 			return strings.Join(rest[1:], " ")
