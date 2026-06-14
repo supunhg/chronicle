@@ -41,8 +41,9 @@ func TestLoad_Frontier(t *testing.T) {
 		}
 	}
 
-	// 15 occupations
-	if got, want := len(pack.Occupations), 15; got != want {
+	// 18 occupations (Phase 22: added woodcutter, miner, weaver
+	// to the 15 from the v1 pack).
+	if got, want := len(pack.Occupations), 18; got != want {
 		t.Errorf("Occupations: got %d, want %d", got, want)
 	}
 

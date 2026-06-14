@@ -310,12 +310,20 @@ func (a *WorkAction) Score(p *core.Person, w *core.World) float64 {
 	return score + noise(w, p.ID, "work")
 }
 
-// Execute produces a small coin gain and reduces hunger.
-// Returns a work memory. In Phase 22 this will hand off to
-// the production-loops economy engine.
+// Execute produces a small coin gain, reduces hunger, and
+// (Phase 22) marks progress on the JoinGuild goal. Returns
+// a work memory. Production itself is done by the
+// EconomyEngine.Tick loop, not by this Execute — Execute is
+// the player-facing action handler; the engine does the
+// bulk daily production for every adult producer regardless
+// of which action they pick.
 func (a *WorkAction) Execute(p *core.Person, w *core.World) []core.Memory {
 	reduceNeed(p, core.NeedHunger, 5)
 	bumpGoalProgress(p, core.GoalBecomeWealthy, 0.01)
+	// Phase 22: JoinGuild alignment. Working for a living is
+	// the entry path into skilled-labor guilds, so each
+	// work tick advances this goal a little.
+	bumpGoalProgress(p, core.GoalJoinGuild, 0.005)
 	return []core.Memory{
 		{
 			ID:             fmt.Sprintf("mem-work-%d-%s", w.Tick, p.ID),
@@ -347,20 +355,21 @@ func (a *SocializeAction) Kind() ActionKind { return ActionKindSocialize }
 
 // Score for SocializeAction:
 //
-//	20 (base) + (100 - companionship)*0.5 + kind*0.2
+//	20 (base) + companionship*0.5 + kind*0.2
 //	+ GoalPriority(RaiseFamily)*25
 //	+ small noise
 //
-// Lonely NPCs strongly prefer socializing. Kind NPCs get a
-// bonus. NPCs pursuing RaiseFamily get a goal-alignment
-// boost.
+// Convention: all needs are "deficit" (higher = more urgent),
+// so a high companionship NEED means "I want company" — i.e.
+// I am lonely. Lonely NPCs strongly prefer socializing. Kind
+// NPCs get a bonus. NPCs pursuing RaiseFamily get a
+// goal-alignment boost.
 func (a *SocializeAction) Score(p *core.Person, w *core.World) float64 {
 	companionship := needValue(p, core.NeedCompanionship)
 	kind := traitValue(p, "kind")
 	goal := goalPriority(p, core.GoalRaiseFamily)
-	loneliness := 100 - companionship
 	score := baseScore +
-		float64(loneliness)*0.5 +
+		float64(companionship)*0.5 +
 		float64(kind)*0.2 +
 		goal*25 +
 		memoryBonus(p, w, "socialize")
@@ -442,18 +451,19 @@ func (a *RestAction) Kind() ActionKind { return ActionKindRest }
 
 // Score for RestAction:
 //
-//	20 (base) + (100 - rest)*0.5 + lazy*0.3 + safety*0.2
+//	20 (base) + rest*0.5 + lazy*0.3 + safety*0.2
 //	+ small noise
 //
-// Tired NPCs strongly prefer rest. Lazy NPCs get a bonus.
-// NPCs that feel unsafe also prefer to stay put.
+// Convention: all needs are "deficit" (higher = more urgent),
+// so a high rest NEED means "I need to rest" — i.e. I am
+// tired. Tired NPCs strongly prefer rest. Lazy NPCs get a
+// bonus. NPCs that feel unsafe also prefer to stay put.
 func (a *RestAction) Score(p *core.Person, w *core.World) float64 {
 	rest := needValue(p, core.NeedRest)
 	lazy := traitValue(p, "lazy")
 	safety := needValue(p, core.NeedSafety)
-	tiredness := 100 - rest
 	score := baseScore +
-		float64(tiredness)*0.5 +
+		float64(rest)*0.5 +
 		float64(lazy)*0.3 +
 		float64(safety)*0.2
 	return score + noise(w, p.ID, "rest")
@@ -582,19 +592,20 @@ func (a *TradeAction) Kind() ActionKind { return ActionKindTrade }
 
 // Score for TradeAction:
 //
-//	20 (base) + (100 - wealth)*0.6 + greedy*0.4
+//	20 (base) + wealth*0.6 + greedy*0.4
 //	+ GoalPriority(BecomeWealthy)*35
 //	+ small noise
 //
-// Poor NPCs prefer trade. Greedy NPCs get a strong bonus.
-// BecomeWealthy is the most-aligned goal.
+// Convention: all needs are "deficit" (higher = more urgent),
+// so a high wealth NEED means "I want money" — i.e. I am
+// poor. Poor NPCs prefer trade. Greedy NPCs get a strong
+// bonus. BecomeWealthy is the most-aligned goal.
 func (a *TradeAction) Score(p *core.Person, w *core.World) float64 {
 	wealth := needValue(p, core.NeedWealth)
 	greedy := traitValue(p, "greedy")
 	goal := goalPriority(p, core.GoalBecomeWealthy)
-	poverty := 100 - wealth
 	score := baseScore +
-		float64(poverty)*0.6 +
+		float64(wealth)*0.6 +
 		float64(greedy)*0.4 +
 		goal*35
 	return score + noise(w, p.ID, "trade")
@@ -638,17 +649,18 @@ func (a *CourtAction) Kind() ActionKind { return ActionKindCourt }
 
 // Score for CourtAction:
 //
-//	20 (base) + romantic*0.5 + (100 - companionship)*0.2
+//	20 (base) + romantic*0.5 + companionship*0.2
 //	+ GoalPriority(GetMarried)*40 + GoalPriority(RaiseFamily)*10
 //	+ small noise
 //
-// Romantic NPCs strongly prefer courting. Lonely NPCs get a
-// smaller boost. The GetMarried goal alignment is the
-// strongest single signal.
+// Convention: all needs are "deficit" (higher = more urgent),
+// so a high companionship NEED means "I want a partner" — i.e.
+// I am lonely. Romantic NPCs strongly prefer courting. Lonely
+// NPCs get a smaller boost. The GetMarried goal alignment is
+// the strongest single signal.
 func (a *CourtAction) Score(p *core.Person, w *core.World) float64 {
 	romantic := traitValue(p, "romantic")
 	companionship := needValue(p, core.NeedCompanionship)
-	loneliness := 100 - companionship
 	marryGoal := goalPriority(p, core.GoalGetMarried)
 	familyGoal := goalPriority(p, core.GoalRaiseFamily)
 	// RelationshipModifier: if there's a high-trust potential
@@ -657,7 +669,7 @@ func (a *CourtAction) Score(p *core.Person, w *core.World) float64 {
 	relBonus := relationshipBonus(p, w, pickCourtTargetID(p, w))
 	score := baseScore +
 		float64(romantic)*0.5 +
-		float64(loneliness)*0.2 +
+		float64(companionship)*0.2 +
 		marryGoal*40 +
 		familyGoal*10 +
 		relBonus +
@@ -725,11 +737,17 @@ func pickCourtTarget(p *core.Person, w *core.World) *core.Person {
 	return w.People[id]
 }
 
-// pickCourtTargetID returns the ID of the first unmarried
-// co-located adult of the opposite gender (sorted by ID for
-// determinism), or "" if no such person exists. Used by
-// CourtAction.Score via relationshipBonus to read the
-// existing-trust delta without taking a *core.Person pointer.
+// pickCourtTargetID returns the ID of a co-located unmarried
+// adult of the opposite gender, chosen deterministically per
+// (worldSeed, tick, personID) via tick.EntityRand. Returns ""
+// if no such person exists. Used by CourtAction.Score via
+// relationshipBonus to read the existing-trust delta without
+// taking a *core.Person pointer.
+//
+// Phase 22 fix: the previous "first by sorted ID" rule made
+// every courter in a location with multiple eligible partners
+// compete for the same target. Determinism is preserved by
+// seeding the pick with (seed, tick, personID).
 func pickCourtTargetID(p *core.Person, w *core.World) string {
 	wantGender := "M"
 	if p.Gender == "M" {
@@ -754,11 +772,6 @@ func pickCourtTargetID(p *core.Person, w *core.World) string {
 	if len(candidates) == 0 {
 		return ""
 	}
-	lowest := candidates[0]
-	for _, c := range candidates[1:] {
-		if c < lowest {
-			lowest = c
-		}
-	}
-	return lowest
+	r := tick.EntityRand(w.Seed, w.Tick, p.ID+":court-target")
+	return candidates[r.Intn(len(candidates))]
 }

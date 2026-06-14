@@ -75,13 +75,15 @@ func TestSelectAction_HungryPrefersWork(t *testing.T) {
 }
 
 // TestSelectAction_LonelyPrefersSocialize verifies that an
-// NPC with low companionship (high loneliness) prefers
-// SocializeAction over WorkAction.
+// NPC with a high companionship need (deficit convention:
+// high = "I want company" = lonely) prefers SocializeAction
+// over WorkAction. Hunger and wealth are zeroed out so the
+// competing work/trade actions don't tie on the noise band.
 func TestSelectAction_LonelyPrefersSocialize(t *testing.T) {
 	w := makeWorld(7, func(p *core.Person) {
-		p.Needs[string(core.NeedCompanionship)] = 5 // very lonely
-		p.Needs[string(core.NeedHunger)] = 50
-		p.Needs[string(core.NeedWealth)] = 50
+		p.Needs[string(core.NeedCompanionship)] = 95 // very lonely
+		p.Needs[string(core.NeedHunger)] = 0        // not hungry
+		p.Needs[string(core.NeedWealth)] = 0         // not poor
 	})
 	// Add a co-located NPC to socialize with.
 	w.AddPerson(&core.Person{

@@ -193,6 +193,34 @@ type EconomySpec struct {
 	InflationThreshold    float64                   `yaml:"inflation_threshold"`
 	ProductionLoops       map[string]ProductionLoop `yaml:"production_loops"`
 	Productivity          ProductivitySpec          `yaml:"productivity"`
+
+	// SettlementStartingStock is the per-location starting stock
+	// for the 4 v1 produced resources, seeded at bootstrap time.
+	// Phase 22 v1: defaults (when omitted) to 50 food, 30 wood,
+	// 10 iron, 10 cloth per location. These are arbitrary v1
+	// values that give the player a few seasons of consumption
+	// buffer before the engine starts reacting to shortages.
+	SettlementStartingStock SettlementStock `yaml:"settlement_starting_stock"`
+
+	// PerCapitaConsumption is the per-tick food consumption per
+	// living person at a location, in food units. Phase 22 v1
+	// default: 0.1 (so 100 people consume 10 food/tick, 1 year
+	// of 365 ticks consumes ~3650 food, a typical settlement
+	// starts with 50 and runs out in ~5 days without
+	// production).
+	PerCapitaConsumption float64 `yaml:"per_capita_consumption"`
+}
+
+// SettlementStock is the per-location starting inventory of the
+// 4 v1 produced resources. Phase 22 v1: worldpacks can override
+// any field; omitted fields default to sensible v1 values
+// (50/30/10/10) so a minimal worldpack still gets a working
+// economy.
+type SettlementStock struct {
+	Food  float64 `yaml:"food"`
+	Wood  float64 `yaml:"wood"`
+	Iron  float64 `yaml:"iron"`
+	Cloth float64 `yaml:"cloth"`
 }
 
 // ItemSpec describes a single item in the worldpack's economy.

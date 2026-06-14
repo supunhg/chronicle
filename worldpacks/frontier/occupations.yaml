@@ -116,6 +116,42 @@ occupations:
     social_class: "lower"
     locations: ["villages"]
 
+  - id: "woodcutter"
+    name: "Woodcutter"
+    category: "labor"
+    needs_weights:
+      hunger: 0.7
+      wealth: 0.4
+      companionship: 0.2
+      safety: 0.5
+    base_wealth: 50
+    social_class: "lower"
+    locations: ["villages"]
+
+  - id: "miner"
+    name: "Miner"
+    category: "labor"
+    needs_weights:
+      hunger: 0.8
+      wealth: 0.4
+      companionship: 0.2
+      safety: 0.4
+    base_wealth: 70
+    social_class: "lower"
+    locations: ["blackwater", "northwatch_fort"]
+
+  - id: "weaver"
+    name: "Weaver"
+    category: "craft"
+    needs_weights:
+      hunger: 0.4
+      wealth: 0.5
+      companionship: 0.3
+      safety: 0.5
+    base_wealth: 120
+    social_class: "middle"
+    locations: ["blackwater", "villages"]
+
   - id: "teacher"
     name: "Teacher"
     category: "service"

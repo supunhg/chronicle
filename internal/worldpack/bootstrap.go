@@ -71,6 +71,41 @@ func Bootstrap(pack *Pack, w *core.World, seed int64) error {
 	// worlds that ship without an economy config).
 	w.Items = BuildItemCatalog(pack.Rules.Economy)
 
+	// 2.7 Phase 22: seed each location's settlement inventory and
+	// dynamic prices. Starting stock comes from
+	// pack.Rules.Economy.SettlementStartingStock (with v1
+	// defaults when omitted). Prices are seeded to the item
+	// catalog's base Value for each resource (the
+	// EconomyEngine.Tick loop will then re-derive them from
+	// the stock ratio each tick).
+	stock := pack.Rules.Economy.SettlementStartingStock
+	if stock.Food == 0 {
+		stock.Food = 50
+	}
+	if stock.Wood == 0 {
+		stock.Wood = 30
+	}
+	if stock.Iron == 0 {
+		stock.Iron = 10
+	}
+	if stock.Cloth == 0 {
+		stock.Cloth = 10
+	}
+	for _, loc := range w.Locations {
+		loc.Settlement = core.SettlementInventory{
+			Food:  stock.Food,
+			Wood:  stock.Wood,
+			Iron:  stock.Iron,
+			Cloth: stock.Cloth,
+		}
+		if w.Items != nil {
+			loc.Prices.Food = w.Items[string(core.ResourceFood)].Value
+			loc.Prices.Wood = w.Items[string(core.ResourceWood)].Value
+			loc.Prices.Iron = w.Items[string(core.ResourceIron)].Value
+			loc.Prices.Cloth = w.Items[string(core.ResourceCloth)].Value
+		}
+	}
+
 	// 3. Deterministic RNG
 	r := rand.New(rand.NewSource(seed))
 
