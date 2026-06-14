@@ -16,7 +16,10 @@ import (
 // newTestWorld builds a small world with 2 people and 2
 // locations for predictable output assertions. The player
 // is "alice" by default; tests that want a different player
-// (or no player) set w.PlayerID directly.
+// (or no player) set w.PlayerID directly. Phase 18: the
+// world's item catalog (w.Items) is populated with the
+// Phase 17.6 default goods so the action engine's buy/sell
+// handlers have a catalog to look up.
 func newTestWorld() *core.World {
 	w := core.NewWorld("test", 1, time.Date(1400, 1, 1, 0, 0, 0, 0, time.UTC))
 	w.AddLocation(&core.Location{ID: "blackwater", Name: "Blackwater", PopulationCap: 100})
@@ -25,8 +28,31 @@ func newTestWorld() *core.World {
 	w.AddPerson(&core.Person{ID: "bob", Name: "Bob", Alive: true, Gender: "M", BirthTick: -30 * 365, LocationID: "ashford"})
 	w.PlayerID = "alice"
 	w.Tick = 100
+	w.Items = defaultTestCatalog()
 	w.RecomputeLocationPopulations()
 	return w
+}
+
+// defaultTestCatalog returns a minimal Phase 18 item catalog
+// for action tests: the same 12 common goods from the
+// Phase 17.6 hardcoded priceList, with Phase 18 metadata
+// (weight, max_durability) added. The action engine looks
+// up the per-item Value from this catalog.
+func defaultTestCatalog() map[string]core.Item {
+	return map[string]core.Item{
+		"bread":  {Name: "bread", Weight: 0.5, Value: 3, MaxDurability: 0.0},
+		"ale":    {Name: "ale", Weight: 1.0, Value: 2, MaxDurability: 0.0},
+		"meat":   {Name: "meat", Weight: 1.0, Value: 8, MaxDurability: 0.0},
+		"apple":  {Name: "apple", Weight: 0.2, Value: 1, MaxDurability: 0.0},
+		"cheese": {Name: "cheese", Weight: 0.4, Value: 5, MaxDurability: 0.0},
+		"rope":   {Name: "rope", Weight: 1.0, Value: 4, MaxDurability: 0.5},
+		"torch":  {Name: "torch", Weight: 0.5, Value: 2, MaxDurability: 0.5},
+		"bed":    {Name: "bed", Weight: 30.0, Value: 15, MaxDurability: 1.0},
+		"sword":  {Name: "sword", Weight: 4.0, Value: 50, MaxDurability: 1.0},
+		"shield": {Name: "shield", Weight: 6.0, Value: 35, MaxDurability: 1.0},
+		"potion": {Name: "potion", Weight: 0.3, Value: 20, MaxDurability: 0.0},
+		"book":   {Name: "book", Weight: 0.5, Value: 10, MaxDurability: 1.0},
+	}
 }
 
 // TestResolve_Time verifies that the time action returns
@@ -360,7 +386,7 @@ func TestApplyTalkDelta_ExistingRelationship(t *testing.T) {
 func TestResolve_Save(t *testing.T) {
 	w := newTestWorld()
 	w.Coin = 42
-	w.Inventory["bread"] = 3
+	w.Inventory["bread"] = core.Item{Name: "bread", Count: 3, Weight: 0.5, Value: 3}
 	eng := New(w, nil)
 	path := filepath.Join(t.TempDir(), "save.db")
 	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSave, Target: path})
@@ -430,11 +456,31 @@ func TestResolve_Buy(t *testing.T) {
 	if w.Coin != 94 { // 100 - 2*3 = 94
 		t.Errorf("Coin after buy = %d, want 94", w.Coin)
 	}
-	if w.Inventory["bread"] != 2 {
-		t.Errorf("Inventory[bread] = %d, want 2", w.Inventory["bread"])
+	if w.Inventory["bread"].Count != 2 {
+		t.Errorf("Inventory[bread].Count = %d, want 2", w.Inventory["bread"].Count)
 	}
 	if !strings.Contains(res.Text, "94") {
 		t.Errorf("buy output missing new coin balance '94': %q", res.Text)
+	}
+}
+
+// TestResolve_BuyCopiesMetadata verifies that the buy copies
+// the catalog's Weight, Value, and MaxDurability into the
+// inventory stack.
+func TestResolve_BuyCopiesMetadata(t *testing.T) {
+	w := newTestWorld()
+	w.Coin = 100
+	eng := New(w, nil)
+	_, _ = eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionBuy, Target: "sword"})
+	stack := w.Inventory["sword"]
+	if stack.Weight != 4.0 {
+		t.Errorf("sword.Weight = %f, want 4.0", stack.Weight)
+	}
+	if stack.Value != 50 {
+		t.Errorf("sword.Value = %d, want 50", stack.Value)
+	}
+	if stack.MaxDurability != 1.0 {
+		t.Errorf("sword.MaxDurability = %f, want 1.0", stack.MaxDurability)
 	}
 }
 
@@ -451,8 +497,8 @@ func TestResolve_BuyDefaultQuantity(t *testing.T) {
 	if w.Coin != 9 { // 10 - 1*1 = 9
 		t.Errorf("Coin after buy = %d, want 9", w.Coin)
 	}
-	if w.Inventory["apple"] != 1 {
-		t.Errorf("Inventory[apple] = %d, want 1", w.Inventory["apple"])
+	if w.Inventory["apple"].Count != 1 {
+		t.Errorf("Inventory[apple].Count = %d, want 1", w.Inventory["apple"].Count)
 	}
 }
 
@@ -491,7 +537,7 @@ func TestResolve_BuyUnknownItem(t *testing.T) {
 func TestResolve_Sell(t *testing.T) {
 	w := newTestWorld()
 	w.Coin = 0
-	w.Inventory["bread"] = 3
+	w.Inventory["bread"] = core.Item{Name: "bread", Count: 3, Weight: 0.5, Value: 3}
 	eng := New(w, nil)
 	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSell, Target: "bread", Args: intent.Args{Quantity: 2}})
 	if !res.OK {
@@ -500,8 +546,8 @@ func TestResolve_Sell(t *testing.T) {
 	if w.Coin != 6 { // 0 + 2*3 = 6
 		t.Errorf("Coin after sell = %d, want 6", w.Coin)
 	}
-	if w.Inventory["bread"] != 1 {
-		t.Errorf("Inventory[bread] = %d, want 1", w.Inventory["bread"])
+	if w.Inventory["bread"].Count != 1 {
+		t.Errorf("Inventory[bread].Count = %d, want 1", w.Inventory["bread"].Count)
 	}
 }
 
@@ -510,7 +556,7 @@ func TestResolve_Sell(t *testing.T) {
 func TestResolve_SellRemovesEmptyEntry(t *testing.T) {
 	w := newTestWorld()
 	w.Coin = 0
-	w.Inventory["apple"] = 1
+	w.Inventory["apple"] = core.Item{Name: "apple", Count: 1, Weight: 0.2, Value: 1}
 	eng := New(w, nil)
 	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSell, Target: "apple"})
 	if !res.OK {
@@ -526,7 +572,7 @@ func TestResolve_SellRemovesEmptyEntry(t *testing.T) {
 func TestResolve_SellInsufficientInventory(t *testing.T) {
 	w := newTestWorld()
 	w.Coin = 0
-	w.Inventory["bread"] = 1
+	w.Inventory["bread"] = core.Item{Name: "bread", Count: 1, Weight: 0.5, Value: 3}
 	eng := New(w, nil)
 	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionSell, Target: "bread", Args: intent.Args{Quantity: 5}})
 	if res.OK {
@@ -559,9 +605,9 @@ func TestResolve_Inventory_Empty(t *testing.T) {
 func TestResolve_Inventory_WithItems(t *testing.T) {
 	w := newTestWorld()
 	w.Coin = 42
-	w.Inventory["sword"] = 1
-	w.Inventory["bread"] = 3
-	w.Inventory["apple"] = 5
+	w.Inventory["sword"] = core.Item{Name: "sword", Count: 1, Weight: 4.0, Value: 50, MaxDurability: 1.0}
+	w.Inventory["bread"] = core.Item{Name: "bread", Count: 3, Weight: 0.5, Value: 3}
+	w.Inventory["apple"] = core.Item{Name: "apple", Count: 5, Weight: 0.2, Value: 1}
 	eng := New(w, nil)
 	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionInventory})
 	if !res.OK {
@@ -738,7 +784,7 @@ func TestResolve_BranchSwitchRoundTrip(t *testing.T) {
 	// 2. Mutate the world heavily.
 	w.People["alice"].LocationID = "ashford"
 	w.Coin = 100
-	w.Inventory["sword"] = 1
+	w.Inventory["sword"] = core.Item{Name: "sword", Count: 1, Weight: 4.0, Value: 50, MaxDurability: 1.0}
 	aliceRel := w.People["alice"]
 	_ = aliceRel
 	w.Memories = append(w.Memories, core.Memory{
@@ -755,8 +801,8 @@ func TestResolve_BranchSwitchRoundTrip(t *testing.T) {
 	if w.Coin != 0 {
 		t.Errorf("Coin = %d after round-trip, want 0", w.Coin)
 	}
-	if w.Inventory["sword"] != 0 {
-		t.Errorf("Inventory[sword] = %d after round-trip, want 0", w.Inventory["sword"])
+	if w.Inventory["sword"].Count != 0 {
+		t.Errorf("Inventory[sword].Count = %d after round-trip, want 0", w.Inventory["sword"].Count)
 	}
 	if len(w.Memories) != 0 {
 		t.Errorf("Memories count = %d after round-trip, want 0", len(w.Memories))

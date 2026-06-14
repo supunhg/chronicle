@@ -62,6 +62,15 @@ func Bootstrap(pack *Pack, w *core.World, seed int64) error {
 	// defaults.
 	w.Rules = rulesFromPack(pack)
 
+	// 2.6 Item catalog (populated from pack.Rules.Economy.Items
+	// and pack.Rules.Economy.Resources). The action engine's
+	// buy/sell handlers read the per-item Value from this
+	// catalog. A worldpack with neither Items nor Resources
+	// produces an empty catalog (which makes buy/sell always
+	// reject — the correct Phase 17.6 fallback for legacy
+	// worlds that ship without an economy config).
+	w.Items = BuildItemCatalog(pack.Rules.Economy)
+
 	// 3. Deterministic RNG
 	r := rand.New(rand.NewSource(seed))
 

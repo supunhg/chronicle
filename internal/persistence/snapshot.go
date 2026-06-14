@@ -144,8 +144,9 @@ func (db *DB) Restore(w *core.World) error {
 
 	// Inventory is scoped to the player (if any). A world with no
 	// PlayerID leaves w.Inventory as-is (it stays nil or whatever
-	// the caller set). Phase 17.6+ is player-only; Phase 18+ may
-	// promote to per-person inventories.
+	// the caller set). Phase 18: reads the full core.Item
+	// metadata (Weight, Value, MaxDurability) from the inventory
+	// table.
 	inv, err := readInventory(db, w.PlayerID)
 	if err != nil {
 		return err
@@ -551,10 +552,11 @@ func decodeTags(s sql.NullString) []string {
 // writeInventory writes the player's inventory rows to the inventory
 // table, scoped by PlayerID. A no-op if PlayerID is empty (world-
 // level mode) — there is no per-person inventory yet for that case.
-// Inventory uses the existing v1 inventory table (person_id,
-// resource, amount) so no schema migration is needed; the amount is
-// stored as a REAL to match the table's column type, but the
-// in-memory value is an int (Phase 17.6 simple counter).
+//
+// Phase 18: each row now stores the full core.Item metadata
+// (weight, value, max_durability) in addition to the count. The
+// v3 migration added the new columns. Legacy v1/v2 rows default
+// to 0 for the new columns.
 func writeInventory(ctx context.Context, tx *sql.Tx, w *core.World) error {
 	if w.PlayerID == "" {
 		return nil
@@ -562,10 +564,10 @@ func writeInventory(ctx context.Context, tx *sql.Tx, w *core.World) error {
 	if w.Inventory == nil {
 		return nil
 	}
-	for resource, amount := range w.Inventory {
+	for resource, item := range w.Inventory {
 		if _, err := tx.ExecContext(ctx,
-			"INSERT INTO inventory (person_id, resource, amount) VALUES (?, ?, ?)",
-			w.PlayerID, resource, float64(amount)); err != nil {
+			"INSERT INTO inventory (person_id, resource, amount, weight, value, max_durability) VALUES (?, ?, ?, ?, ?, ?)",
+			w.PlayerID, resource, float64(item.Count), item.Weight, item.Value, item.MaxDurability); err != nil {
 			return fmt.Errorf("persistence: write inventory %s/%s: %w", w.PlayerID, resource, err)
 		}
 	}
@@ -576,24 +578,30 @@ func writeInventory(ctx context.Context, tx *sql.Tx, w *core.World) error {
 // table, scoped by personID. Returns a non-nil empty map when no
 // rows exist. An empty personID yields an empty map (nothing to
 // load for world-level mode).
-func readInventory(db *DB, personID string) (map[string]int, error) {
-	out := make(map[string]int)
+//
+// Phase 18: each row returns a full core.Item (Count, Weight,
+// Value, MaxDurability). Legacy v1/v2 rows have 0 for the new
+// columns; the action engine can refresh the metadata from
+// the worldpack catalog on the next buy/sell.
+func readInventory(db *DB, personID string) (map[string]core.Item, error) {
+	out := make(map[string]core.Item)
 	if personID == "" {
 		return out, nil
 	}
 	rows, err := db.Query(
-		"SELECT resource, amount FROM inventory WHERE person_id = ?", personID)
+		"SELECT resource, amount, weight, value, max_durability FROM inventory WHERE person_id = ?", personID)
 	if err != nil {
 		return nil, fmt.Errorf("persistence: query inventory: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var resource string
+		var item core.Item
 		var amount float64
-		if err := rows.Scan(&resource, &amount); err != nil {
+		if err := rows.Scan(&item.Name, &amount, &item.Weight, &item.Value, &item.MaxDurability); err != nil {
 			return nil, fmt.Errorf("persistence: scan inventory: %w", err)
 		}
-		out[resource] = int(amount)
+		item.Count = int(amount)
+		out[item.Name] = item
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("persistence: iterate inventory: %w", err)

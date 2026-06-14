@@ -181,10 +181,10 @@ func (e *Engine) resolveTime() Result {
 }
 
 // resolveInventory shows the player's current inventory
-// and coin balance. Phase 17.6: reads from the world's
-// Inventory map and Coin field. Phase 18+ may add
-// per-person inventories (the current model is player-
-// only).
+// and coin balance. Phase 18: reads from the world's
+// map[string]Item Inventory. Each stack shows name, count,
+// weight, value, and durability. Sorted by name for
+// deterministic output.
 func (e *Engine) resolveInventory() Result {
 	if len(e.world.Inventory) == 0 {
 		return Result{OK: true, Text: fmt.Sprintf("You have nothing. (Coin: %d)", e.world.Coin)}
@@ -198,7 +198,9 @@ func (e *Engine) resolveInventory() Result {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are carrying (Coin: %d):\n", e.world.Coin)
 	for _, name := range names {
-		fmt.Fprintf(&b, "  %s x%d\n", name, e.world.Inventory[name])
+		it := e.world.Inventory[name]
+		fmt.Fprintf(&b, "  %s x%d (%.1fkg, %d coin, dur %.0f%%)\n",
+			it.Name, it.Count, it.Weight, it.Value, it.MaxDurability*100)
 	}
 	return Result{OK: true, Text: b.String()}
 }
@@ -349,12 +351,15 @@ func (e *Engine) resolveSave(path string) Result {
 }
 
 // resolveBuy handles "buy <item> [quantity]" — adds items
-// to the player's inventory and deducts Coin. Phase 17.6
-// uses a fixed price list (priceList). Phase 18+ will
-// read prices from the worldpack's EconomySpec.
+// to the player's inventory and deducts Coin. Phase 18 reads
+// the per-item price from the worldpack's item catalog
+// (w.Items) instead of the Phase 17.6 hardcoded priceList.
 //
 // Quantity defaults to 1 when 0 or negative. The buy is
-// rejected if the player can't afford it.
+// rejected if the player can't afford it or the item is
+// unknown. The buy copies the catalog's Weight, Value, and
+// MaxDurability into the inventory stack so a switch back to
+// a pre-buy world preserves the metadata at acquisition time.
 func (e *Engine) resolveBuy(item string, quantity int) Result {
 	if item == "" {
 		return Result{OK: false, Text: "Buy what?"}
@@ -366,23 +371,34 @@ func (e *Engine) resolveBuy(item string, quantity int) Result {
 	if quantity <= 0 {
 		quantity = 1
 	}
-	price, ok := priceList[strings.ToLower(item)]
+	key := strings.ToLower(item)
+	catalog, ok := e.world.Items[key]
 	if !ok {
 		return Result{OK: false, Text: fmt.Sprintf("I don't know the price of %q.", item)}
 	}
-	cost := price * quantity
+	cost := catalog.Value * quantity
 	if e.world.Coin < cost {
 		return Result{OK: false, Text: fmt.Sprintf("You can't afford %d %s (%d coin); you only have %d.", quantity, item, cost, e.world.Coin)}
 	}
 	e.world.Coin -= cost
-	e.world.Inventory[item] = e.world.Inventory[item] + quantity
+	// Add to inventory, creating or updating the stack. The
+	// stack's metadata (Weight, Value, MaxDurability) is
+	// copied from the catalog at acquisition time.
+	stack := e.world.Inventory[key]
+	stack.Name = key
+	stack.Count += quantity
+	stack.Weight = catalog.Weight
+	stack.Value = catalog.Value
+	stack.MaxDurability = catalog.MaxDurability
+	e.world.Inventory[key] = stack
 	return Result{OK: true, Text: fmt.Sprintf("You buy %d %s for %d coin. (Coin: %d)", quantity, item, cost, e.world.Coin)}
 }
 
 // resolveSell handles "sell <item> [quantity]" — removes
-// items from the player's inventory and adds Coin. Uses
-// the same priceList as buy. The sell is rejected if the
-// player doesn't have the item (or enough of it).
+// items from the player's inventory and adds Coin. Phase 18
+// reads the per-item price from the worldpack's item catalog
+// (w.Items). The sell is rejected if the player doesn't have
+// the item (or enough of it), or if the item is unknown.
 func (e *Engine) resolveSell(item string, quantity int) Result {
 	if item == "" {
 		return Result{OK: false, Text: "Sell what?"}
@@ -394,19 +410,26 @@ func (e *Engine) resolveSell(item string, quantity int) Result {
 	if quantity <= 0 {
 		quantity = 1
 	}
-	price, ok := priceList[strings.ToLower(item)]
+	key := strings.ToLower(item)
+	catalog, ok := e.world.Items[key]
 	if !ok {
 		return Result{OK: false, Text: fmt.Sprintf("I don't know the price of %q.", item)}
 	}
-	have := e.world.Inventory[item]
-	if have < quantity {
+	stack, ok := e.world.Inventory[key]
+	if !ok || stack.Count < quantity {
+		have := 0
+		if ok {
+			have = stack.Count
+		}
 		return Result{OK: false, Text: fmt.Sprintf("You only have %d %s; can't sell %d.", have, item, quantity)}
 	}
-	value := price * quantity
+	value := catalog.Value * quantity
 	e.world.Coin += value
-	e.world.Inventory[item] = have - quantity
-	if e.world.Inventory[item] == 0 {
-		delete(e.world.Inventory, item)
+	stack.Count -= quantity
+	if stack.Count <= 0 {
+		delete(e.world.Inventory, key)
+	} else {
+		e.world.Inventory[key] = stack
 	}
 	return Result{OK: true, Text: fmt.Sprintf("You sell %d %s for %d coin. (Coin: %d)", quantity, item, value, e.world.Coin)}
 }
@@ -485,7 +508,7 @@ func (e *Engine) resolveSwitch(name string) Result {
 	// (a legacy DB written before Phase 17.6 may not have
 	// serialized the inventory).
 	if e.world.Inventory == nil {
-		e.world.Inventory = make(map[string]int)
+		e.world.Inventory = make(map[string]core.Item)
 	}
 	return Result{OK: true, Text: fmt.Sprintf("Switched to %q. (tick %d, %d people)", name, e.world.Tick, len(e.world.People))}
 }
@@ -675,25 +698,6 @@ func locationNameOrID(w *core.World, id string) string {
 // Wrapped in a function for symmetry with future fields.
 func playerID(w *core.World) string {
 	return w.PlayerID
-}
-
-// priceList is the Phase 17.6 v1 price table for common
-// goods. Prices are in coin per unit. Phase 18+ will read
-// this from the worldpack's EconomySpec. Lookup is
-// case-insensitive (lowercased before lookup).
-var priceList = map[string]int{
-	"bread":  3,
-	"ale":    2,
-	"meat":   8,
-	"apple":  1,
-	"cheese": 5,
-	"rope":   4,
-	"torch":  2,
-	"bed":    15,
-	"sword":  50,
-	"shield": 35,
-	"potion": 20,
-	"book":   10,
 }
 
 // isValidBranchName reports whether name is safe to use as

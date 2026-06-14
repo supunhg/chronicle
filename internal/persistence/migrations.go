@@ -13,9 +13,12 @@ var schemaSQL string
 //go:embed migrations/0002_world_rules.sql
 var worldRulesSQL string
 
+//go:embed migrations/0003_item_metadata.sql
+var itemMetadataSQL string
+
 // CurrentVersion is the highest schema version Migrate will apply.
 // Increment this when adding a new migration in Migrations below.
-const CurrentVersion = 2
+const CurrentVersion = 3
 
 // Migrations lists every schema migration in version order. Index N is
 // migration N+1. Each entry is a self-contained SQL script that, when
@@ -25,9 +28,12 @@ const CurrentVersion = 2
 // Phase 1: v1 creates all 8 entity tables (people, relationships,
 //          memories, locations, factions, events, inventory, world_meta).
 // Phase 7: v2 adds world_rules for persisting WorldRules.
+// Phase 18: v3 adds weight/value/max_durability columns to the
+//          inventory table for the new core.Item struct.
 var Migrations = []string{
-	schemaSQL,     // v1
-	worldRulesSQL, // v2
+	schemaSQL,        // v1
+	worldRulesSQL,    // v2
+	itemMetadataSQL,  // v3
 }
 
 // versionTableDDL creates the schema_version table if it does not

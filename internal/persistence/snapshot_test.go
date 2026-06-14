@@ -758,15 +758,16 @@ func TestSnapshot_CoinRoundTrip(t *testing.T) {
 // survives a Snapshot/Restore cycle. Phase 17.6 added Inventory
 // to core.World; Phase 17.7 (branch/switch) needs it to round-trip
 // so a switch back to a pre-buy world restores the original
-// inventory. The existing v1 inventory table is reused, scoped by
-// PlayerID.
+// inventory. Phase 18 promoted Inventory to map[string]Item, so
+// we verify the full Item struct (Count, Weight, Value,
+// MaxDurability) round-trips.
 func TestSnapshot_InventoryRoundTrip(t *testing.T) {
 	db := newTestDB(t)
 	w := core.NewWorld("inv-rt", 1, time.Date(1400, 1, 1, 0, 0, 0, 0, time.UTC))
 	w.PlayerID = "alice"
-	w.Inventory["bread"] = 3
-	w.Inventory["sword"] = 1
-	w.Inventory["apple"] = 5
+	w.Inventory["bread"] = core.Item{Name: "bread", Count: 3, Weight: 0.5, Value: 3, MaxDurability: 0.0}
+	w.Inventory["sword"] = core.Item{Name: "sword", Count: 1, Weight: 4.0, Value: 50, MaxDurability: 1.0}
+	w.Inventory["apple"] = core.Item{Name: "apple", Count: 5, Weight: 0.2, Value: 1, MaxDurability: 0.0}
 	if err := db.Snapshot(w); err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
@@ -778,14 +779,20 @@ func TestSnapshot_InventoryRoundTrip(t *testing.T) {
 	if len(loaded.Inventory) != 3 {
 		t.Fatalf("len(Inventory) = %d, want 3", len(loaded.Inventory))
 	}
-	if loaded.Inventory["bread"] != 3 {
-		t.Errorf("Inventory[bread] = %d, want 3", loaded.Inventory["bread"])
+	if loaded.Inventory["bread"].Count != 3 {
+		t.Errorf("Inventory[bread].Count = %d, want 3", loaded.Inventory["bread"].Count)
 	}
-	if loaded.Inventory["sword"] != 1 {
-		t.Errorf("Inventory[sword] = %d, want 1", loaded.Inventory["sword"])
+	if loaded.Inventory["sword"].Count != 1 {
+		t.Errorf("Inventory[sword].Count = %d, want 1", loaded.Inventory["sword"].Count)
 	}
-	if loaded.Inventory["apple"] != 5 {
-		t.Errorf("Inventory[apple] = %d, want 5", loaded.Inventory["apple"])
+	if loaded.Inventory["sword"].Value != 50 {
+		t.Errorf("Inventory[sword].Value = %d, want 50", loaded.Inventory["sword"].Value)
+	}
+	if loaded.Inventory["sword"].Weight != 4.0 {
+		t.Errorf("Inventory[sword].Weight = %f, want 4.0", loaded.Inventory["sword"].Weight)
+	}
+	if loaded.Inventory["apple"].Count != 5 {
+		t.Errorf("Inventory[apple].Count = %d, want 5", loaded.Inventory["apple"].Count)
 	}
 }
 
@@ -797,15 +804,15 @@ func TestSnapshot_InventoryOverwrite(t *testing.T) {
 
 	w1 := core.NewWorld("first", 1, time.Date(1400, 1, 1, 0, 0, 0, 0, time.UTC))
 	w1.PlayerID = "alice"
-	w1.Inventory["bread"] = 3
-	w1.Inventory["sword"] = 1
+	w1.Inventory["bread"] = core.Item{Name: "bread", Count: 3, Weight: 0.5, Value: 3}
+	w1.Inventory["sword"] = core.Item{Name: "sword", Count: 1, Weight: 4.0, Value: 50}
 	if err := db.Snapshot(w1); err != nil {
 		t.Fatalf("first Snapshot: %v", err)
 	}
 
 	w2 := core.NewWorld("second", 2, time.Date(1500, 1, 1, 0, 0, 0, 0, time.UTC))
 	w2.PlayerID = "alice"
-	w2.Inventory["apple"] = 7
+	w2.Inventory["apple"] = core.Item{Name: "apple", Count: 7, Weight: 0.2, Value: 1}
 	if err := db.Snapshot(w2); err != nil {
 		t.Fatalf("second Snapshot: %v", err)
 	}
@@ -818,8 +825,8 @@ func TestSnapshot_InventoryOverwrite(t *testing.T) {
 	if len(loaded.Inventory) != 1 {
 		t.Fatalf("len(Inventory) = %d, want 1 (full-replace semantics)", len(loaded.Inventory))
 	}
-	if loaded.Inventory["apple"] != 7 {
-		t.Errorf("Inventory[apple] = %d, want 7", loaded.Inventory["apple"])
+	if loaded.Inventory["apple"].Count != 7 {
+		t.Errorf("Inventory[apple].Count = %d, want 7", loaded.Inventory["apple"].Count)
 	}
 	if _, exists := loaded.Inventory["bread"]; exists {
 		t.Errorf("Inventory[bread] should be gone after overwrite")
@@ -834,7 +841,7 @@ func TestSnapshot_InventoryOverwrite(t *testing.T) {
 func TestSnapshot_NoPlayerNoInventory(t *testing.T) {
 	db := newTestDB(t)
 	w := core.NewWorld("no-player", 1, time.Date(1400, 1, 1, 0, 0, 0, 0, time.UTC))
-	w.Inventory["bread"] = 3
+	w.Inventory["bread"] = core.Item{Name: "bread", Count: 3, Weight: 0.5, Value: 3}
 	if err := db.Snapshot(w); err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}

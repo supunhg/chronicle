@@ -162,10 +162,29 @@ type MigrationSpec struct {
 // EconomySpec is the economy configuration.
 type EconomySpec struct {
 	Resources             []string                  `yaml:"resources"`
+	Items                 []ItemSpec                `yaml:"items"`
 	StartingCoinPerPerson int                       `yaml:"starting_coin_per_person"`
 	InflationThreshold    float64                   `yaml:"inflation_threshold"`
 	ProductionLoops       map[string]ProductionLoop `yaml:"production_loops"`
 	Productivity          ProductivitySpec          `yaml:"productivity"`
+}
+
+// ItemSpec describes a single item in the worldpack's economy.
+// Each ItemSpec becomes an entry in the world's item catalog
+// (World.Items). Phase 18: the action engine's buy/sell handlers
+// read the per-item Value from the catalog instead of the
+// Phase 17.6 hardcoded priceList.
+//
+// Fields default to sensible values when omitted from the
+// worldpack's rules.yaml: Weight defaults to the value in
+// worldpack.DefaultItemSpec, Value defaults to 0 (free), and
+// MaxDurability defaults to the default-table value. The
+// name is the canonical lowercase item name (e.g. "bread").
+type ItemSpec struct {
+	Name          string  `yaml:"name"`
+	Weight        float64 `yaml:"weight"`
+	Value         int     `yaml:"value"`
+	MaxDurability float64 `yaml:"max_durability"`
 }
 
 // ProductionLoop is one occupation's production recipe.

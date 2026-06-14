@@ -63,17 +63,71 @@ type World struct {
 	// flag on `chronicle play`).
 	PlayerID string
 
-	// Inventory is the player's owned items (keyed by item
-	// name). Phase 17.6: a simple name→count map. The buy/sell
-	// handlers in the action engine read and mutate this.
-	// Phase 18+ may promote it to a typed Item struct (with
-	// weight, value, durability) and per-person inventories.
-	Inventory map[string]int
+	// Items is the world's item catalog: metadata for all known
+	// item types, keyed by canonical lowercase name. Phase 18
+	// replaces the Phase 17.6 hardcoded priceList in the action
+	// engine. Populated by worldpack.Bootstrap from the
+	// worldpack's EconomySpec.Items (with sensible defaults
+	// when a resource has no explicit spec). The action engine's
+	// buy/sell handlers look up the per-item Value from this
+	// catalog. A nil or empty catalog means no items can be
+	// bought or sold (which is the correct Phase 17.6 fallback
+	// for worlds without a worldpack).
+	Items map[string]Item
+
+	// Inventory is the player's carried items, keyed by
+	// canonical lowercase item name. Phase 18 promoted this
+	// from map[string]int to map[string]Item: each stack now
+	// carries its own Count, Weight, Value, and MaxDurability.
+	// The metadata is copied from the catalog (Items) at
+	// acquisition time so a switch back to a pre-buy world still
+	// preserves the snapshot of the items' properties at the
+	// time they were acquired.
+	Inventory map[string]Item
 
 	// Coin is the player's money. Phase 17.6: a simple integer
 	// counter. Buy reduces Coin; sell increases it. Phase 18+
 	// may add inflation, debt, and per-faction currencies.
 	Coin int
+}
+
+// Item represents a single item type in the world. The same
+// struct is used for both the world's item catalog
+// (World.Items) and for stacks in inventories (World.Inventory).
+// Count is only meaningful for inventory entries; catalog
+// entries have Count=0.
+//
+// Phase 18 promoted Inventory from map[string]int to
+// map[string]Item so each stack carries its own weight, value,
+// and durability metadata. The worldpack's EconomySpec.Items
+// is the source of truth for the per-item properties; the
+// action engine copies them into Inventory stacks at
+// acquisition time.
+type Item struct {
+	// Name is the canonical lowercase item name (e.g. "bread").
+	// This is also the map key in World.Items and World.Inventory.
+	Name string
+
+	// Count is the number of this item in the stack. Only
+	// meaningful for inventory entries; catalog entries
+	// (World.Items) have Count=0.
+	Count int
+
+	// Weight is the mass of a single unit, in kg. Used for
+	// future encumbrance rules (Phase 19+).
+	Weight float64
+
+	// Value is the coin price per unit, set from the worldpack's
+	// economy at catalog-load time. Buy deducts Value*Count from
+	// Coin; sell adds Value*Count to Coin.
+	Value int
+
+	// MaxDurability is the starting durability of a fresh item
+	// (1.0 = perfect, 0.5 = worn). 0 means the item has no
+	// durability (perishable consumables like bread). Phase 18
+	// does not yet track per-instance durability; this is the
+	// upper bound for the future per-instance field.
+	MaxDurability float64
 }
 
 // WorldRules holds the tunable world rules. Fields are sourced from a
@@ -122,7 +176,7 @@ func NewWorld(id string, seed int64, start time.Time) *World {
 		Factions:      make(map[string]*Faction),
 		Relationships: []Relationship{},
 		Memories:      []Memory{},
-		Inventory:     make(map[string]int),
+		Inventory:     make(map[string]Item),
 	}
 }
 
