@@ -122,7 +122,7 @@ func TestFiveGenerationSimulation(t *testing.T) {
 
 	// 1. Bootstrap the frontier worldpack.
 	packDir := filepath.Join("..", "..", "worldpacks", "frontier")
-	pack, err := worldpack.Load(packDir)
+	_, pack, err := worldpack.Load(packDir)
 	if err != nil {
 		t.Fatalf("Load(frontier): %v", err)
 	}

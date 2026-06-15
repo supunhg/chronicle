@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,8 +25,11 @@ func frontierPackDir(t *testing.T) string {
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	// thisFile is cmd/chronicle/main_test.go; project root is 3 levels up.
-	return filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "worldpacks", "frontier")
+	// thisFile is cmd/chronicle/main_test.go; project root is 2 levels up
+	// (cmd/chronicle -> cmd -> project root). A previous version of this
+	// helper used 3 ".." which resolved one level above the project root
+	// and silently skipped every worldpack-dependent test.
+	return filepath.Join(filepath.Dir(thisFile), "..", "..", "worldpacks", "frontier")
 }
 
 // quietStderr redirects os.Stderr to /dev/null for the duration of t,
@@ -1485,6 +1489,200 @@ func TestDiffCmd_FlagParses(t *testing.T) {
 
 	if err := runDiffCmd([]string{dbPath1, dbPath2}); err != nil {
 		t.Fatalf("runDiffCmd: %v", err)
+	}
+}
+
+// TestParseMixedFlags_FlagsBeforePositional verifies the standard
+// Unix convention still works: flags before positional args.
+// Regression guard for the v1 unblocker fix that lets flags appear
+// AFTER the world name (the bug that made `chronicle new mygame
+// --seed 42` silently use the default seed).
+func TestParseMixedFlags_FlagsBeforePositional(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	seed := fs.Int64("seed", 12345, "World seed")
+	replFlag := fs.Bool("repl", false, "Enter REPL")
+	positional, err := parseMixedFlags(fs, []string{"--seed", "42", "mygame"})
+	if err != nil {
+		t.Fatalf("parseMixedFlags: %v", err)
+	}
+	if *seed != 42 {
+		t.Errorf("seed = %d, want 42", *seed)
+	}
+	if *replFlag {
+		t.Error("replFlag = true, want false (not set)")
+	}
+	if len(positional) != 1 || positional[0] != "mygame" {
+		t.Errorf("positional = %v, want [mygame]", positional)
+	}
+}
+
+// TestParseMixedFlags_FlagsAfterPositional is the regression test
+// for the v1 unblocker bug. Before the fix, this would leave
+// --seed 42 in the positional list and the seed at its default.
+func TestParseMixedFlags_FlagsAfterPositional(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	seed := fs.Int64("seed", 12345, "World seed")
+	replFlag := fs.Bool("repl", false, "Enter REPL")
+	positional, err := parseMixedFlags(fs, []string{"mygame", "--seed", "42", "-repl"})
+	if err != nil {
+		t.Fatalf("parseMixedFlags: %v", err)
+	}
+	if *seed != 42 {
+		t.Errorf("seed = %d, want 42 (flag after positional must be parsed)", *seed)
+	}
+	if !*replFlag {
+		t.Error("replFlag = false, want true (flag after positional must be parsed)")
+	}
+	if len(positional) != 1 || positional[0] != "mygame" {
+		t.Errorf("positional = %v, want [mygame]", positional)
+	}
+}
+
+// TestParseMixedFlags_InlineValueForm verifies --flag=value and
+// -flag=value (self-contained, no space) work in any position.
+func TestParseMixedFlags_InlineValueForm(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	seed := fs.Int64("seed", 12345, "World seed")
+	positional, err := parseMixedFlags(fs, []string{"mygame", "--seed=42"})
+	if err != nil {
+		t.Fatalf("parseMixedFlags: %v", err)
+	}
+	if *seed != 42 {
+		t.Errorf("seed = %d, want 42 (inline form must be parsed)", *seed)
+	}
+	if len(positional) != 1 || positional[0] != "mygame" {
+		t.Errorf("positional = %v, want [mygame]", positional)
+	}
+}
+
+// TestParseMixedFlags_MultiplePositional verifies that multiple
+// positional args (e.g., chronicle diff a.db b.db) are all
+// preserved in order, even with flags interleaved.
+func TestParseMixedFlags_MultiplePositional(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	seed := fs.Int64("seed", 12345, "World seed")
+	positional, err := parseMixedFlags(fs, []string{"first", "--seed", "7", "second", "third"})
+	if err != nil {
+		t.Fatalf("parseMixedFlags: %v", err)
+	}
+	if *seed != 7 {
+		t.Errorf("seed = %d, want 7", *seed)
+	}
+	want := []string{"first", "second", "third"}
+	if len(positional) != len(want) {
+		t.Fatalf("positional = %v, want %v", positional, want)
+	}
+	for i, v := range want {
+		if positional[i] != v {
+			t.Errorf("positional[%d] = %q, want %q", i, positional[i], v)
+		}
+	}
+}
+
+// TestParseMixedFlags_BooleanFlagValueNotConsumed verifies that a
+// boolean flag does NOT consume the following arg as its value
+// (the next arg is treated as positional, not as the flag's value).
+// This is critical for `chronicle resume db.db -repl` where -repl
+// is a bool and db.db is the positional path.
+func TestParseMixedFlags_BooleanFlagValueNotConsumed(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	replFlag := fs.Bool("repl", false, "Enter REPL")
+	positional, err := parseMixedFlags(fs, []string{"db.db", "-repl"})
+	if err != nil {
+		t.Fatalf("parseMixedFlags: %v", err)
+	}
+	if !*replFlag {
+		t.Error("replFlag = false, want true")
+	}
+	if len(positional) != 1 || positional[0] != "db.db" {
+		t.Errorf("positional = %v, want [db.db]", positional)
+	}
+}
+
+// TestParseMixedFlags_MissingValueErrors verifies that a non-boolean
+// flag at the end of args with no following value returns a clear
+// error rather than silently dropping the flag.
+func TestParseMixedFlags_MissingValueErrors(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.Int64("seed", 12345, "World seed")
+	_, err := parseMixedFlags(fs, []string{"mygame", "--seed"})
+	if err == nil {
+		t.Fatal("expected error for --seed with no value, got nil")
+	}
+	if !strings.Contains(err.Error(), "seed") {
+		t.Errorf("error %v should mention 'seed'", err)
+	}
+}
+
+// TestParseMixedFlags_EmptyArgs verifies the no-args case returns
+// an empty positional slice with no error.
+func TestParseMixedFlags_EmptyArgs(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	seed := fs.Int64("seed", 12345, "World seed")
+	positional, err := parseMixedFlags(fs, []string{})
+	if err != nil {
+		t.Fatalf("parseMixedFlags: %v", err)
+	}
+	if *seed != 12345 {
+		t.Errorf("seed = %d, want default 12345", *seed)
+	}
+	if len(positional) != 0 {
+		t.Errorf("positional = %v, want []", positional)
+	}
+}
+
+// TestNewCmdCmd_RespectsSeedFlag is the CLI-level integration test
+// for the v1 unblocker bug fix. Before the fix, this would produce
+// world ID 00003039 (default seed=12345) regardless of --seed.
+// After the fix, it must produce world ID 0000002a (seed=42).
+func TestNewCmdCmd_RespectsSeedFlag(t *testing.T) {
+	defer quietStderr(t)()
+
+	packDir := frontierPackDir(t)
+	if _, err := os.Stat(packDir); err != nil {
+		t.Skipf("frontier worldpack not available at %s: %v", packDir, err)
+	}
+
+	tmpDir := t.TempDir()
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
+
+	// The exact args the user typed: world name first, then --seed 99.
+	// This is the form that was broken before the fix. runNewCmd
+	// returns only error; the side effects (db file + world state)
+	// are what we assert on by reading the .db back via runInfo.
+	//
+	// We pass -pack explicitly because the test chdirs into a temp
+	// dir (so the path resolver's CWD-walk-up can't find the pack).
+	// The test's job is to verify --seed flag parsing, not the path
+	// resolver (which has its own coverage).
+	if err := runNewCmd([]string{"-pack", packDir, "testgame", "--seed", "99"}); err != nil {
+		t.Fatalf("runNewCmd([testgame --seed 99]): %v", err)
+	}
+	dbPath := "testgame.db"
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("expected save at %s, got: %v", dbPath, err)
+	}
+	// Read the saved world back and verify its ID encodes seed 99.
+	// World ID is 8 hex chars of uint32(seed); seed=99 -> 0x63 -> 00000063.
+	db, err := persistence.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open %s: %v", dbPath, err)
+	}
+	defer db.Close()
+	loaded := core.NewWorld("", 0, time.Time{})
+	if err := db.Restore(loaded); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	const wantID = "00000063"
+	if loaded.ID != wantID {
+		t.Errorf("loaded.ID = %q, want %q (--seed 99 must be honored)", loaded.ID, wantID)
 	}
 }
 

@@ -3,6 +3,8 @@ package worldpack
 import (
 	"fmt"
 	"math/rand"
+	"os"
+	"sort"
 
 	"github.com/chronicle-dev/chronicle/internal/core"
 )
@@ -151,7 +153,71 @@ func Bootstrap(pack *Pack, w *core.World, seed int64) error {
 	// 7. Recompute populations (Location.Population is derived state)
 	w.RecomputeLocationPopulations()
 
+	// 8. Auto-designate a player. Without a PlayerID, the action
+	// engine rejects travel/buy/sell with "You need a player
+	// character" — which blocks the core game loop. The worldpack
+	// declares the implicit player's starting location in
+	// `region.default_player_location`; we pick the first
+	// non-merchant alive person at that location, falling back
+	// to the first alive person by sorted ID if the field is
+	// empty or no qualifying person exists at the named
+	// location (defensive — the frontier pack always places 80+
+	// people at blackwater). A future worldpack can also
+	// override the auto-designation with an explicit PlayerID
+	// before calling Bootstrap (e.g., from a CLI flag).
+	//
+	// The player is a plain Person (not a merchant) so the buy/sell
+	// handlers find a different person at the same location to
+	// trade with. The `first` merchant at the player's location
+	// is the trading partner.
+	//
+	// When the fallback fires (named location is empty, or the
+	// field is unset), we log a warning to stderr so a
+	// worldpack author with a typo in `default_player_location`
+	// (or an empty main town) gets a signal during playtest
+	// instead of a silently demoted player.
+	if w.PlayerID == "" {
+		playerLoc := pack.Region.DefaultPlayerLocation
+		var firstByID string
+		for _, id := range sortedPeopleIDs(w) {
+			p := w.People[id]
+			if !p.Alive {
+				continue
+			}
+			if p.IsMerchant {
+				continue // the player shouldn't be a merchant
+			}
+			if playerLoc != "" && p.LocationID == playerLoc {
+				w.PlayerID = p.ID
+				break
+			}
+			if firstByID == "" {
+				firstByID = p.ID
+			}
+		}
+		if w.PlayerID == "" && firstByID != "" {
+			w.PlayerID = firstByID
+			if playerLoc != "" {
+				fmt.Fprintf(os.Stderr, "worldpack: default_player_location %q has no qualifying people (alive, non-merchant); falling back to first alive person %q at %q — check the location id and population\n", playerLoc, firstByID, w.People[firstByID].LocationID)
+			}
+		}
+	}
+
 	return nil
+}
+
+// sortedPeopleIDs returns the people map's keys in sorted order.
+// Used by Bootstrap to pick a deterministic player and by
+// other code paths that need order-stable iteration over the
+// map (Go map iteration is randomized, which would make the
+// auto-designated player non-deterministic across runs).
+func sortedPeopleIDs(w *core.World) []string {
+	ids := make([]string, 0, len(w.People))
+	for id := range w.People {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // rulesFromPack projects a Pack's Rules block into a *core.WorldRules.

@@ -16,7 +16,7 @@ import (
 // Asserts no panics and that the world state remains internally
 // consistent (alive/dead counts add up, no duplicate IDs).
 func TestIntegration_LoadBootstrapRun(t *testing.T) {
-	pack, err := Load(filepath.Clean(frontierDir))
+	_, pack, err := Load(filepath.Clean(frontierDir))
 	if err != nil {
 		t.Skipf("frontier pack not available: %v", err)
 	}

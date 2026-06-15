@@ -182,13 +182,16 @@ func (p *Parser) ruleTravel(raw string, rest []string) (Intent, bool) {
 
 // ruleTargeted handles verbs that take exactly one target
 // (talk, inspect). The prepositions list is stripped from
-// the front of rest. Returns ok=false if no target is
-// given — the verb requires one.
+// the front of rest. Returns the intent (with empty target
+// when none was given) and ok=true — the action engine
+// handles the empty-target case with a friendly usage
+// message, avoiding a wasted LLM round trip for inputs
+// like bare "talk" or "inspect". The pre-LLM rule path is
+// preferred even for empty targets so the player gets a
+// deterministic, localizable message instead of an LLM
+// "I don't understand" fallback.
 func (p *Parser) ruleTargeted(raw string, rest []string, verb Action, prepositions ...string) (Intent, bool) {
 	target := stripPreposition(rest, prepositions...)
-	if target == "" {
-		return Intent{}, false
-	}
 	return Intent{Action: verb, Target: target, Raw: raw, Source: "rule"}, true
 }
 

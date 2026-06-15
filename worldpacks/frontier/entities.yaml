@@ -8,6 +8,12 @@ region:
   name: "The Free Marches"
   size_km: 120
   era: "Late Medieval / Early Renaissance (1400-1500 equivalent)"
+  # Phase 26.5: bootstrap's auto-PlayerID logic picks the
+  # first non-merchant alive person at this location as the
+  # implicit player (when no explicit PlayerID is set). This
+  # keeps the auto-designation worldpack-driven instead of
+  # hardcoded in bootstrap.go.
+  default_player_location: "blackwater"
 
 locations:
   - id: "blackwater"

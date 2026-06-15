@@ -1029,6 +1029,137 @@ func TestResolve_Sell_CreatesMerchantEntryFromZero(t *testing.T) {
 	}
 }
 
+// TestFindPerson_FirstNameMatch verifies that the action
+// engine's findPerson resolves a first name to the full
+// "First Last" person. This is the common REPL case:
+// `talk Lily` should find "Lily Kensington" without the
+// player having to type the full name.
+func TestFindPerson_FirstNameMatch(t *testing.T) {
+	w := newTestWorld()
+	// Replace Alice with a multi-word name so the first-name
+	// path is the only thing that can match.
+	delete(w.People, "alice")
+	w.AddPerson(&core.Person{
+		ID: "lily", Name: "Lily Kensington", Alive: true, Gender: "F",
+		BirthTick: -19 * 365, LocationID: "blackwater",
+	})
+	eng := New(w, nil)
+	got := eng.findPerson("lily")
+	if got == nil {
+		t.Fatalf("findPerson(lily) = nil, want Lily Kensington")
+	}
+	if got.ID != "lily" {
+		t.Errorf("findPerson(lily).ID = %q, want 'lily'", got.ID)
+	}
+}
+
+// TestFindPerson_CaseInsensitiveFirstName verifies that
+// the first-name match is case-insensitive ("LILY" matches
+// "Lily Kensington").
+func TestFindPerson_CaseInsensitiveFirstName(t *testing.T) {
+	w := newTestWorld()
+	delete(w.People, "alice")
+	w.AddPerson(&core.Person{
+		ID: "lily", Name: "Lily Kensington", Alive: true, Gender: "F",
+		BirthTick: -19 * 365, LocationID: "blackwater",
+	})
+	eng := New(w, nil)
+	for _, target := range []string{"lily", "Lily", "LILY", "lIlY"} {
+		if got := eng.findPerson(target); got == nil || got.ID != "lily" {
+			t.Errorf("findPerson(%q) = %v, want lily", target, got)
+		}
+	}
+}
+
+// TestFindPerson_FirstNameTieIsDeterministic verifies that
+// when multiple people share a first name, the lookup is
+// deterministic (sorted-ID order) so the result is stable
+// across runs and replays.
+func TestFindPerson_FirstNameTieIsDeterministic(t *testing.T) {
+	w := newTestWorld()
+	delete(w.People, "alice")
+	w.AddPerson(&core.Person{
+		ID: "n0002", Name: "Lily Kensington", Alive: true, Gender: "F",
+		BirthTick: -19 * 365, LocationID: "blackwater",
+	})
+	w.AddPerson(&core.Person{
+		ID: "n0001", Name: "Lily Holloway", Alive: true, Gender: "F",
+		BirthTick: -21 * 365, LocationID: "blackwater",
+	})
+	eng := New(w, nil)
+	// Sorted IDs: n0001 first → Lily Holloway wins.
+	if got := eng.findPerson("lily"); got == nil || got.ID != "n0001" {
+		t.Errorf("findPerson(lily) = %v, want n0001 (Lily Holloway, by sorted ID)", got)
+	}
+}
+
+// TestFindPerson_FullNameStillWins verifies that the
+// full-name match is checked BEFORE the first-name match,
+// so "lily kensington" still resolves to the right person
+// even when another person has a matching first name.
+func TestFindPerson_FullNameStillWins(t *testing.T) {
+	w := newTestWorld()
+	delete(w.People, "alice")
+	w.AddPerson(&core.Person{
+		ID: "lily-k", Name: "Lily Kensington", Alive: true, Gender: "F",
+		BirthTick: -19 * 365, LocationID: "blackwater",
+	})
+	w.AddPerson(&core.Person{
+		ID: "lily-h", Name: "Lily Holloway", Alive: true, Gender: "F",
+		BirthTick: -21 * 365, LocationID: "blackwater",
+	})
+	eng := New(w, nil)
+	if got := eng.findPerson("lily kensington"); got == nil || got.ID != "lily-k" {
+		t.Errorf("findPerson(lily kensington) = %v, want lily-k", got)
+	}
+	if got := eng.findPerson("lily holloway"); got == nil || got.ID != "lily-h" {
+		t.Errorf("findPerson(lily holloway) = %v, want lily-h", got)
+	}
+}
+
+// TestFindPerson_EmptyTarget verifies that findPerson
+// returns nil for an empty target (so the action engine
+// can return a "Talk to whom?" message without doing a
+// wasted scan).
+func TestFindPerson_EmptyTarget(t *testing.T) {
+	w := newTestWorld()
+	eng := New(w, nil)
+	if got := eng.findPerson(""); got != nil {
+		t.Errorf("findPerson(\"\") = %v, want nil", got)
+	}
+}
+
+// TestResolve_Talk_EmptyTarget verifies that `talk` with
+// no name returns a friendly "Talk to whom?" message
+// instead of falling through to the LLM fallback (which
+// costs a network round trip and an API-key requirement
+// for a question we already know the answer to).
+func TestResolve_Talk_EmptyTarget(t *testing.T) {
+	w := newTestWorld()
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionTalk})
+	if res.OK {
+		t.Errorf("talk (no target): OK = true, want false")
+	}
+	if !strings.Contains(res.Text, "Talk to whom") {
+		t.Errorf("talk (no target) output missing 'Talk to whom': %q", res.Text)
+	}
+}
+
+// TestResolve_Inspect_EmptyTarget verifies that `inspect`
+// with no name returns a friendly "Inspect whom?" message.
+func TestResolve_Inspect_EmptyTarget(t *testing.T) {
+	w := newTestWorld()
+	eng := New(w, nil)
+	res, _ := eng.Resolve(context.Background(), intent.Intent{Action: intent.ActionInspect})
+	if res.OK {
+		t.Errorf("inspect (no target): OK = true, want false")
+	}
+	if !strings.Contains(res.Text, "Inspect whom") {
+		t.Errorf("inspect (no target) output missing 'Inspect whom': %q", res.Text)
+	}
+}
+
 // TestIsValidBranchName exhaustively checks the branch
 // name validator.
 func TestIsValidBranchName(t *testing.T) {

@@ -42,8 +42,11 @@ import (
 const DefaultEndpoint = "https://opencode.ai/zen/v1"
 
 // DefaultModel is the default chat model. The Narrator LLM
-// (Phase 17.4) will use this unless overridden in config.yaml.
-const DefaultModel = "gpt-4o-mini"
+// (Phase 17.4) will use this unless overridden in config.yaml
+// or the OPENCODE_ZEN_MODEL env var. Pinned to a model that
+// the typical opencode.ai/zen account has access to; users
+// on other accounts can override per the env-var contract.
+const DefaultModel = "deepseek-v4-flash-free"
 
 // DefaultTimeout caps any single HTTP request. Ping is fast
 // (a small JSON response); Chat may need more time once it is
@@ -245,7 +248,18 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage) (string, erro
 		const maxErrBody = 4 << 10 // 4 KiB
 		buf := make([]byte, maxErrBody)
 		n, _ := io.ReadFull(resp.Body, buf)
-		return "", fmt.Errorf("llm: chat %s: status %d: %s", url, resp.StatusCode, strings.TrimSpace(string(buf[:n])))
+		body := strings.TrimSpace(string(buf[:n]))
+		// When the endpoint rejects the configured model
+		// (e.g. opencode.ai/zen returns 401 "Model X is not
+		// supported"), surface a hint about the env var so the
+		// user knows the fix is a one-line shell change. The
+		// shape of the hint matches what `chronicle doctor`
+		// prints on a missing/wrong API key.
+		if strings.Contains(body, "Model") && strings.Contains(body, "not supported") {
+			return "", fmt.Errorf("llm: chat %s: status %d: %s (hint: set %s to a model your account supports)",
+				url, resp.StatusCode, body, EnvModel)
+		}
+		return "", fmt.Errorf("llm: chat %s: status %d: %s", url, resp.StatusCode, body)
 	}
 
 	var decoded ChatResponse

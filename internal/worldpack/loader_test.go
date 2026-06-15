@@ -12,7 +12,7 @@ func TestLoad_Frontier(t *testing.T) {
 	// from <repo>/internal/worldpack, so go up two levels.
 	dir := filepath.Join("..", "..", "worldpacks", "frontier")
 
-	pack, err := Load(dir)
+	_, pack, err := Load(dir)
 	if err != nil {
 		t.Fatalf("Load(frontier): %v", err)
 	}
@@ -75,7 +75,7 @@ func TestLoad_Frontier(t *testing.T) {
 
 // TestLoad_MissingDir returns an error when the directory does not exist.
 func TestLoad_MissingDir(t *testing.T) {
-	_, err := Load("does-not-exist")
+	_, _, err := Load("does-not-exist")
 	if err == nil {
 		t.Fatal("expected error for missing directory, got nil")
 	}

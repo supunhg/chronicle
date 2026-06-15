@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/chronicle-dev/chronicle/internal/action"
@@ -662,16 +663,37 @@ func (r *REPL) execAdvance(unit string) error {
 	return nil
 }
 
-// findPerson looks up a person by exact ID first, then
-// by case-insensitive name match. Returns nil if not
-// found. Used by look, inspect, talk.
+// findPerson looks up a person by exact ID first, then by
+// case-insensitive full-name match, then by case-insensitive
+// first-token (first name) match. Mirrors action.Engine.findPerson
+// so the REPL's direct paths (no Action engine set) match the
+// Action engine's behavior. Sorted-ID iteration makes the
+// first-token match deterministic for ties.
+//
+// Returns nil if target is empty or no match is found. Used by
+// look, inspect, talk.
 func (r *REPL) findPerson(target string) *core.Person {
+	if target == "" {
+		return nil
+	}
 	if p, ok := r.world.People[target]; ok {
 		return p
 	}
 	lower := strings.ToLower(target)
 	for _, p := range r.world.People {
 		if strings.ToLower(p.Name) == lower {
+			return p
+		}
+	}
+	ids := make([]string, 0, len(r.world.People))
+	for id := range r.world.People {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		p := r.world.People[id]
+		parts := strings.Fields(p.Name)
+		if len(parts) > 0 && strings.ToLower(parts[0]) == lower {
 			return p
 		}
 	}

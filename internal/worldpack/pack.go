@@ -51,6 +51,20 @@ type Region struct {
 	Name   string `yaml:"name"`
 	SizeKm int    `yaml:"size_km"`
 	Era    string `yaml:"era"`
+
+	// DefaultPlayerLocation is the location where the implicit
+	// player character is auto-designated at bootstrap time, when
+	// the world is started without an explicit PlayerID. Phase
+	// 26.5+: a worldpack that ships its own implicit-player
+	// town (the "main settlement with a merchant") sets this
+	// field, and Bootstrap picks the first non-merchant alive
+	// person at this location as the player. The fallback chain
+	// (when the field is empty, or no qualifying person exists
+	// at the named location) is: the first alive person by
+	// sorted ID. This avoids hardcoding location names in
+	// Bootstrap and makes the auto-PlayerID choice
+	// worldpack-driven.
+	DefaultPlayerLocation string `yaml:"default_player_location"`
 }
 
 // LocationSpec is one location in entities.yaml.

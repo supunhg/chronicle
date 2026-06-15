@@ -12,7 +12,7 @@ const frontierDir = "../../worldpacks/frontier"
 
 func loadFrontierOrSkip(t *testing.T) *Pack {
 	t.Helper()
-	pack, err := Load(filepath.Clean(frontierDir))
+	_, pack, err := Load(filepath.Clean(frontierDir))
 	if err != nil {
 		t.Skipf("frontier pack not available: %v", err)
 	}
@@ -247,7 +247,190 @@ func TestBootstrap_DifferentSeeds(t *testing.T) {
 	}
 }
 
-// TestBootstrap_PersonIDFormat verifies that all Person IDs are
+// TestBootstrap_AutoPlayerID verifies that Bootstrap
+// auto-designates a PlayerID so the action engine's
+// travel/buy/sell handlers work out of the box. Without
+// this, `chronicle new` would produce a world where
+// travel/buy/sell fail with "You need a player character".
+// The player must be a non-merchant alive person at
+// blackwater (the main town with a merchant), with a
+// deterministic choice (sorted ID).
+func TestBootstrap_AutoPlayerID(t *testing.T) {
+	pack := loadFrontierOrSkip(t)
+	w := core.NewWorld("autoplayer", 42, time.Unix(0, 0))
+	if err := Bootstrap(pack, w, 42); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	if w.PlayerID == "" {
+		t.Fatal("Bootstrap did not auto-set PlayerID")
+	}
+	player, ok := w.People[w.PlayerID]
+	if !ok {
+		t.Fatalf("PlayerID %q not in w.People", w.PlayerID)
+	}
+	if !player.Alive {
+		t.Errorf("auto-designated player %q is not alive", w.PlayerID)
+	}
+	if player.IsMerchant {
+		t.Errorf("auto-designated player %q is a merchant (should be a regular person)", w.PlayerID)
+	}
+	if player.LocationID != "blackwater" {
+		t.Errorf("auto-designated player %q is at %q, want 'blackwater'", w.PlayerID, player.LocationID)
+	}
+}
+
+// TestBootstrap_PreservesExplicitPlayerID verifies that if
+// the world already has a PlayerID set before Bootstrap
+// (e.g., a test or a future worldpack config), Bootstrap
+// does not overwrite it. The auto-designation is a default,
+// not a mandate.
+func TestBootstrap_PreservesExplicitPlayerID(t *testing.T) {
+	pack := loadFrontierOrSkip(t)
+	w := core.NewWorld("explicit", 42, time.Unix(0, 0))
+	w.PlayerID = "n0001" // explicit; should be preserved
+	if err := Bootstrap(pack, w, 42); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	if w.PlayerID != "n0001" {
+		t.Errorf("Bootstrap overwrote explicit PlayerID: got %q, want n0001", w.PlayerID)
+	}
+}
+
+// TestBootstrap_RegionDefaultPlayerLocation verifies that
+// the region.default_player_location field is loaded from
+// the worldpack and respected by Bootstrap. The frontier
+// pack declares "blackwater", so the auto-designated player
+// should be at blackwater. A custom pack that declares
+// "dawn_monastery" should place the auto-designated player
+// at dawn_monastery instead. This makes the
+// implicit-player choice worldpack-driven instead of
+// hardcoded in bootstrap.go.
+func TestBootstrap_RegionDefaultPlayerLocation(t *testing.T) {
+	pack := loadFrontierOrSkip(t)
+	if pack.Region.DefaultPlayerLocation != "blackwater" {
+		t.Fatalf("frontier pack DefaultPlayerLocation: got %q, want 'blackwater' (regression: YAML key rename?)", pack.Region.DefaultPlayerLocation)
+	}
+
+	// Build a minimal in-memory pack with dawn_monastery as the
+	// default player location, populated with 5 people (the
+	// clergy bucket's 5 priests). The auto-designated player
+	// should be a non-merchant alive priest at dawn_monastery.
+	customPack := &Pack{
+		Region: Region{
+			Name:                   "Test Region",
+			DefaultPlayerLocation:  "dawn_monastery",
+		},
+		Locations: []LocationSpec{
+			{ID: "dawn_monastery", Name: "Dawn Monastery", Kind: "monastery", PopulationCap: 10},
+		},
+		Occupations: []OccupationSpec{
+			{ID: "priest", Name: "Priest", SocialClass: "lower", NeedsWeights: map[string]float64{"devout": 2.0}},
+		},
+		Generation: GenerationSpec{
+			Population: PopulationSpec{Total: 5},
+			GenderRatio: GenderRatio{Female: 0.5},
+			AgeDistribution: []AgeBracket{{Range: [2]int{20, 40}, Share: 1.0}},
+			LocationDistribution: []LocationBucket{
+				{Location: "clergy", Count: 5}, // the "clergy" bucket maps to dawn_monastery
+			},
+			SocialClassDistribution: []ClassBucket{{Class: "lower", Share: 1.0}},
+			Names: NamePools{
+				Male:     []string{"Alaric"},
+				Female:   []string{"Mira"},
+				Surnames: []string{"of the Dawn"},
+			},
+		},
+		Rules: RulesSpec{
+			Lifecycle: LifecycleSpec{AdultAge: 16, FertileMinAge: 16, FertileMaxAge: 50, AnnualDeathChance: 0.01},
+			Family:    FamilySpec{MinBirthIntervalTicks: 365, MaxChildren: 6},
+		},
+	}
+	w := core.NewWorld("customregion", 42, time.Unix(0, 0))
+	if err := Bootstrap(customPack, w, 42); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	if w.PlayerID == "" {
+		t.Fatal("Bootstrap did not auto-set PlayerID for custom pack")
+	}
+	player, ok := w.People[w.PlayerID]
+	if !ok {
+		t.Fatalf("PlayerID %q not in w.People", w.PlayerID)
+	}
+	if !player.Alive {
+		t.Errorf("auto-designated player %q is not alive", w.PlayerID)
+	}
+	if player.IsMerchant {
+		t.Errorf("auto-designated player %q is a merchant", w.PlayerID)
+	}
+	if player.LocationID != "dawn_monastery" {
+		t.Errorf("auto-designated player %q is at %q, want 'dawn_monastery' (region.default_player_location not respected)", w.PlayerID, player.LocationID)
+	}
+}
+
+// TestBootstrap_AutoPlayerID_FallsBackWhenNoOneAtLocation
+// verifies the fallback chain: if region.default_player_location
+// is set but no qualifying (alive, non-merchant) person happens
+// to be at that location, Bootstrap falls back to the first
+// alive person by sorted ID. This keeps the auto-designation
+// robust against worldpack authors declaring a "main town" that
+// happens to be empty in some run.
+func TestBootstrap_AutoPlayerID_FallsBackWhenNoOneAtLocation(t *testing.T) {
+	customPack := &Pack{
+		Region: Region{
+			Name:                  "Empty Main Town",
+			DefaultPlayerLocation: "ghost_town", // nobody lives here
+		},
+		Locations: []LocationSpec{
+			{ID: "ghost_town", Name: "Ghost Town", Kind: "town", PopulationCap: 10},
+			{ID: "real_town", Name: "Real Town", Kind: "town", PopulationCap: 80},
+		},
+		Occupations: []OccupationSpec{
+			{ID: "farmer", Name: "Farmer", SocialClass: "lower", NeedsWeights: map[string]float64{"hunger": 1.0}},
+		},
+		Generation: GenerationSpec{
+			Population: PopulationSpec{Total: 5},
+			GenderRatio: GenderRatio{Female: 0.5},
+			AgeDistribution: []AgeBracket{{Range: [2]int{20, 40}, Share: 1.0}},
+			LocationDistribution: []LocationBucket{
+				{Location: "real_town", Count: 5}, // all 5 people at real_town
+			},
+			SocialClassDistribution: []ClassBucket{{Class: "lower", Share: 1.0}},
+			Names: NamePools{
+				Male:     []string{"Bren"},
+				Female:   []string{"Sera"},
+				Surnames: []string{"of the Vale"},
+			},
+		},
+		Rules: RulesSpec{
+			Lifecycle: LifecycleSpec{AdultAge: 16, FertileMinAge: 16, FertileMaxAge: 50, AnnualDeathChance: 0.01},
+			Family:    FamilySpec{MinBirthIntervalTicks: 365, MaxChildren: 6},
+		},
+	}
+	w := core.NewWorld("fallback", 42, time.Unix(0, 0))
+	if err := Bootstrap(customPack, w, 42); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	if w.PlayerID == "" {
+		// We have 5 alive people (the fallback should fire) — failing
+		// here means the fallback path is broken.
+		t.Fatal("Bootstrap did not auto-set PlayerID; expected fallback to first alive person")
+	}
+	player, ok := w.People[w.PlayerID]
+	if !ok {
+		t.Fatalf("PlayerID %q not in w.People", w.PlayerID)
+	}
+	if !player.Alive {
+		t.Errorf("auto-designated player %q is not alive", w.PlayerID)
+	}
+	if player.LocationID == "ghost_town" {
+		t.Errorf("auto-designated player %q is at empty ghost_town; fallback should have picked real_town", w.PlayerID)
+	}
+	// With 5 people sorted by ID, the first is n0001. The sorted-ID
+	// tie-break is the documented deterministic fallback.
+	if w.PlayerID != "n0001" {
+		t.Errorf("fallback PlayerID: got %q, want n0001 (first alive person by sorted ID)", w.PlayerID)
+	}
+}
 // "n" + 4-digit number, matching the deterministic generation scheme.
 func TestBootstrap_PersonIDFormat(t *testing.T) {
 	pack := loadFrontierOrSkip(t)

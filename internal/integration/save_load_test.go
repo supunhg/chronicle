@@ -69,7 +69,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 
 	// 1. Bootstrap.
 	packDir := filepath.Join("..", "..", "worldpacks", "frontier")
-	pack, err := worldpack.Load(packDir)
+	_, pack, err := worldpack.Load(packDir)
 	if err != nil {
 		t.Fatalf("Load(frontier): %v", err)
 	}

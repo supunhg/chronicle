@@ -164,6 +164,9 @@ func (e *Engine) resolveLook(target string) Result {
 // Phase 17.6+ may add an inspect-specific template (e.g.,
 // showing traits, needs, goals).
 func (e *Engine) resolveInspect(target string) Result {
+	if strings.TrimSpace(target) == "" {
+		return Result{OK: false, Text: "Inspect whom? (Usage: inspect <name>)"}
+	}
 	p := e.findPerson(target)
 	if p == nil {
 		return Result{OK: false, Text: fmt.Sprintf("I don't see %q here.", target)}
@@ -214,6 +217,9 @@ func (e *Engine) resolveInventory() Result {
 // as the player (or anywhere, if no player is set — the
 // REPL can be run in world-level mode).
 func (e *Engine) resolveTalk(ctx context.Context, target string) Result {
+	if strings.TrimSpace(target) == "" {
+		return Result{OK: false, Text: "Talk to whom? (Usage: talk <name>)"}
+	}
 	p := e.findPerson(target)
 	if p == nil {
 		return Result{OK: false, Text: fmt.Sprintf("I don't see %q here.", target)}
@@ -661,15 +667,46 @@ func (e *Engine) advanceTick(n int64) {
 	e.world.Now = e.world.Now.AddDate(0, 0, int(n))
 }
 
-// findPerson looks up a person by exact ID first, then by
-// case-insensitive name match. Returns nil if not found.
+// findPerson looks up a person in three stages, in order:
+//
+//  1. Exact ID match (handles internal callers that already
+//     know the ID).
+//  2. Exact (case-insensitive) full-name match ("Lily
+//     Kensington" matches the literal "lily kensington").
+//  3. First-token match (case-insensitive). This is the
+//     common case for the REPL: a player types
+//     "talk Lily" rather than "talk Lily Kensington", and
+//     we want the lookup to find the right person. When
+//     multiple people share a first name, sorted-ID
+//     iteration picks a stable winner so the result is
+//     deterministic for tests and replays.
+//
+// Returns nil if target is empty or no match is found.
 func (e *Engine) findPerson(target string) *core.Person {
+	if target == "" {
+		return nil
+	}
+	// 1. Exact ID match.
 	if p, ok := e.world.People[target]; ok {
 		return p
 	}
 	lower := strings.ToLower(target)
+	// 2. Exact full-name match (case-insensitive).
 	for _, p := range e.world.People {
 		if strings.ToLower(p.Name) == lower {
+			return p
+		}
+	}
+	// 3. First-token match. Sort IDs for deterministic ties.
+	ids := make([]string, 0, len(e.world.People))
+	for id := range e.world.People {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		p := e.world.People[id]
+		parts := strings.Fields(p.Name)
+		if len(parts) > 0 && strings.ToLower(parts[0]) == lower {
 			return p
 		}
 	}

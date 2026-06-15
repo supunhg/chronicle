@@ -47,6 +47,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -64,6 +65,82 @@ import (
 )
 
 const version = "0.0.0"
+
+// parseMixedFlags parses args that may have flags interleaved
+// with positional args. Go's flag.Parse stops at the first
+// non-flag arg, so we need to manually separate flags from
+// positional args before calling fs.Parse.
+//
+// The strategy:
+//  1. Walk through args. Args starting with "-" are flags.
+//     Args not starting with "-" are positional.
+//  2. For non-boolean flags, the next arg is the value.
+//     For boolean flags, there's no value.
+//  3. For --flag=value or -flag=value, the value is inline.
+//  4. After separating, call fs.Parse(flagArgs) to set the
+//     flag values, and return the positional args.
+//
+// This allows `chronicle new mygame --seed 42 -repl` to work
+// (flags after the world name) in addition to the standard
+// Unix convention of flags-first. Without this, the world
+// name would be the first non-flag arg and fs.Parse would
+// stop there, leaving --seed 42 in the positional list and
+// the seed at its default value.
+//
+// Returns the positional args (in order). The flag set is
+// updated in place with the parsed flag values.
+func parseMixedFlags(fs *flag.FlagSet, args []string) ([]string, error) {
+	// Build a set of boolean flag names so we know which flags
+	// take a value and which don't. Go's flag.Flag stores the
+	// default-value's string in DefValue; for bool flags this is
+	// "true" or "false", and for other types it's a number, quoted
+	// string, or duration. This is the standard idiom for
+	// distinguishing bool from non-bool flags without poking at
+	// unexported flag-package internals.
+	boolFlags := make(map[string]bool)
+	fs.VisitAll(func(f *flag.Flag) {
+		if f.DefValue == "true" || f.DefValue == "false" {
+			boolFlags[f.Name] = true
+		}
+	})
+
+	var flagArgs, positional []string
+	i := 0
+	for i < len(args) {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "-") {
+			// Non-flag arg: positional.
+			positional = append(positional, arg)
+			i++
+			continue
+		}
+		// --flag=value or -flag=value: self-contained, no
+		// following arg to consume.
+		if strings.Contains(arg, "=") {
+			flagArgs = append(flagArgs, arg)
+			i++
+			continue
+		}
+		// Strip leading dashes to get the flag name.
+		name := strings.TrimLeft(arg, "-")
+		if boolFlags[name] {
+			// Boolean flag: no value.
+			flagArgs = append(flagArgs, arg)
+			i++
+			continue
+		}
+		// Non-boolean flag: consume the next arg as the value.
+		if i+1 >= len(args) {
+			return nil, fmt.Errorf("flag -%s requires a value", name)
+		}
+		flagArgs = append(flagArgs, arg, args[i+1])
+		i += 2
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return nil, err
+	}
+	return positional, nil
+}
 
 func main() {
 	// Subcommand dispatch. Explicit subcommands are matched first;
@@ -143,15 +220,15 @@ func runNewCmd(args []string) error {
 	seed := fs.Int64("seed", 12345, "World seed for deterministic RNG")
 	outPath := fs.String("out", "", "Output snapshot path; default is <name>.db")
 	replFlag := fs.Bool("repl", false, "If set, drop into the in-game REPL after creating the world")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseMixedFlags(fs, args)
+	if err != nil {
 		return err
 	}
-	positional := fs.Args()
 	if len(positional) < 1 {
 		return fmt.Errorf("usage: chronicle new <name> [flags]\n\n  <name> is the human-readable world name. The save file is written\n  to <name>.db (or the path given by -out).")
 	}
 	name := positional[0]
-	_, _, err := runNew(name, *packDir, *seed, *outPath, *replFlag)
+	_, _, err = runNew(name, *packDir, *seed, *outPath, *replFlag)
 	return err
 }
 
@@ -190,7 +267,7 @@ func runNew(name, packDir string, seed int64, outPath string, enterRepl bool) (*
 		return nil, "", err
 	}
 	if enterRepl {
-		return loaded, outPath, enterREPL(loaded)
+		return loaded, outPath, enterREPL(loaded, packDir)
 	}
 	return loaded, outPath, nil
 }
@@ -307,7 +384,7 @@ func runPlayCmd(args []string) error {
 	ticks := fs.Int("ticks", 100, "Number of ticks to run (1 tick = 1 simulated day)")
 	seed := fs.Int64("seed", 12345, "World seed for deterministic RNG")
 	replFlag := fs.Bool("repl", false, "If set, drop into the in-game REPL after the initial ticks")
-	if err := fs.Parse(args); err != nil {
+	if _, err := parseMixedFlags(fs, args); err != nil {
 		return err
 	}
 
@@ -317,7 +394,7 @@ func runPlayCmd(args []string) error {
 	}
 	printSummary(w, "Final state")
 	if *replFlag {
-		return enterREPL(w)
+		return enterREPL(w, *packDir)
 	}
 	return nil
 }
@@ -329,14 +406,30 @@ func runPlayCmd(args []string) error {
 func runPlay(packDir string, numTicks int, seed int64) (*core.World, error) {
 	fmt.Fprintf(os.Stderr, "chronicle v%s\n", version)
 
-	// 1. Load the worldpack
-	pack, err := worldpack.Load(packDir)
+	// 1. Load the worldpack. Capture the resolved dir so the
+	// LLM config lookup below can read the worldpack's
+	// sibling llm.yaml (which is CWD-relative from the
+	// caller's perspective but absolute from the loader's).
+	resolvedPackDir, pack, err := worldpack.Load(packDir)
 	if err != nil {
 		return nil, fmt.Errorf("load pack: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "Loaded pack %q: %d locations, %d factions, %d occupations, %d action rules\n",
-		pack.Region.Name, len(pack.Locations), len(pack.Factions),
+	fmt.Fprintf(os.Stderr, "Loaded pack %q (from %s): %d locations, %d factions, %d occupations, %d action rules\n",
+		pack.Region.Name, resolvedPackDir, len(pack.Locations), len(pack.Factions),
 		len(pack.Occupations), len(pack.ActionRules))
+
+	// 1b. Resolve the LLM config from the worldpack's
+	// llm.yaml (if present). Uses the resolved dir so
+	// `chronicle new` works from any CWD, not just the
+	// project root.
+	if llmPath := llmConfigPathForPack(resolvedPackDir); llmPath != "" {
+		llmCfg, err := llm.LoadConfig(llmPath)
+		if err != nil {
+			return nil, fmt.Errorf("load LLM config from %s: %w", llmPath, err)
+		}
+		fmt.Fprintf(os.Stderr, "LLM: endpoint=%s model=%s (from %s; override with %s)\n",
+			llmCfg.Endpoint, llmCfg.Model, llmPath, llm.EnvModel)
+	}
 
 	// 2. Create a fresh world
 	worldID := fmt.Sprintf("%08x", uint32(seed))
@@ -417,7 +510,7 @@ func runSaveCmd(args []string) error {
 	outPath := fs.String("out", "", "Output snapshot path; default is <world-id>.db (world-id derived from seed)")
 	autoResume := fs.Bool("auto-resume", false, "If set, auto-resume the saved DB when the post-save world is in a game-over state (no alive people)")
 	autoResumeTicks := fs.Int("auto-resume-ticks", 100, "Number of ticks to run on auto-resume (only meaningful with -auto-resume)")
-	if err := fs.Parse(args); err != nil {
+	if _, err := parseMixedFlags(fs, args); err != nil {
 		return err
 	}
 
@@ -623,6 +716,18 @@ func runDiffCmd(args []string) error {
 // one-shot comparison report to stderr. Neither DB is mutated.
 func runDiff(dbPath1, dbPath2 string) error {
 	fmt.Fprintf(os.Stderr, "chronicle v%s\n", version)
+
+	// Validate both files exist before opening either. A missing
+	// file is a hard error, not a "diff against an empty world":
+	// silently diffing against a fresh empty world would report
+	// "0 differences" for a typo'd filename, which is a
+	// footgun. os.Stat is cheap and gives the user a clear
+	// "file not found" instead of a misleading empty diff.
+	for _, p := range []string{dbPath1, dbPath2} {
+		if _, err := os.Stat(p); err != nil {
+			return fmt.Errorf("diff: %w", err)
+		}
+	}
 
 	w1, close1, err := openSnapshot(dbPath1)
 	if err != nil {
@@ -976,7 +1081,7 @@ func personDiffs(a, b *core.Person) []string {
 func runDoctorCmd(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	configPath := fs.String("config", "", "Path to llm.yaml (default: skip file lookup)")
-	if err := fs.Parse(args); err != nil {
+	if _, err := parseMixedFlags(fs, args); err != nil {
 		return err
 	}
 	return runDoctor(*configPath)
@@ -1044,11 +1149,10 @@ func runResumeCmd(args []string) error {
 	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
 	ticks := fs.Int("ticks", 100, "Number of ticks to run after resuming")
 	replFlag := fs.Bool("repl", false, "If set, drop into the in-game REPL after the resumed ticks")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseMixedFlags(fs, args)
+	if err != nil {
 		return err
 	}
-
-	positional := fs.Args()
 	if len(positional) < 1 {
 		return fmt.Errorf("usage: chronicle resume <db-path> [-ticks N]")
 	}
@@ -1057,10 +1161,33 @@ func runResumeCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Resume doesn't have a worldpack dir; fall back to the
+	// default so a worldpack-shipped llm.yaml (if any) is still
+	// picked up. The default -pack flag value matches the one
+	// used by every other subcommand, so a player who resumes
+	// from inside the project gets the same LLM defaults as
+	// they would from `chronicle new`.
 	if *replFlag {
-		return enterREPL(w)
+		return enterREPL(w, "worldpacks/frontier")
 	}
 	return nil
+}
+
+// llmConfigPathForPack returns the path to the worldpack's
+// llm.yaml if it exists, or "" otherwise. The LLM config
+// loader treats "" as "skip file lookup", so the env-var and
+// built-in-default paths still apply. A worldpack with no
+// llm.yaml is a perfectly valid worldpack; the worldpack
+// author simply hasn't shipped any LLM defaults.
+func llmConfigPathForPack(packDir string) string {
+	if packDir == "" {
+		return ""
+	}
+	path := filepath.Join(packDir, "llm.yaml")
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	return ""
 }
 
 // enterREPL constructs and runs the in-game REPL on the given
@@ -1070,17 +1197,38 @@ func runResumeCmd(args []string) error {
 // the user into the REPL prompt loop. Blocks until the user
 // types `quit`, `exit`, or EOFs stdin.
 //
+// packDir is the worldpack directory the world was loaded
+// from. The LLM config loader consults <packDir>/llm.yaml
+// (if present) before env vars. Pass "" to skip the worldpack
+// lookup and rely on env vars + built-in defaults only.
+//
 // The simulation created here is independent of any simulation
 // used by the caller (e.g., the one that ran the initial ticks
 // in runPlay/runResume). Both simulations operate on the same
 // world — the engines are stateless readers/writers of world
 // state, so the second simulation picks up exactly where the
 // first left off.
-func enterREPL(w *core.World) error {
-	// LLM client: env > yaml > default. If the API key is empty,
-	// the LLM fallback will fail with a clear error; the rule
-	// parser still works.
-	llmCfg, _ := llm.LoadConfig("")
+func enterREPL(w *core.World, packDir string) error {
+	// LLM client: worldpack llm.yaml > env > built-in default.
+	// If the API key is empty, the LLM fallback will fail with
+	// a clear error; the rule parser still works. The packDir
+	// is the resolved absolute path (or "" to skip the
+	// worldpack lookup). If it's still the raw CWD-relative
+	// form, ResolveDir walks up to find the real one.
+	llmPath, err := worldpack.ResolveDir(packDir)
+	if err != nil {
+		// pack doesn't exist — fine, just skip llm.yaml.
+		llmPath = ""
+	} else {
+		llmPath = filepath.Join(llmPath, "llm.yaml")
+		if _, err := os.Stat(llmPath); err != nil {
+			llmPath = ""
+		}
+	}
+	llmCfg, err := llm.LoadConfig(llmPath)
+	if err != nil {
+		return fmt.Errorf("repl: load LLM config from %s: %w", llmPath, err)
+	}
 	llmClient := llm.NewClient(
 		llm.WithEndpoint(llmCfg.Endpoint),
 		llm.WithAPIKey(llmCfg.APIKey),
