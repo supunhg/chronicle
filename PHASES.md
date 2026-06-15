@@ -30,13 +30,13 @@ acceptance test, and a status. The full spec is in
 
 | Sub | Goal | Acceptance test | Status |
 |---|---|---|---|
-| **28** | `> help` prints the 12 verbs + meta-commands | `TestREPL_Help` | ⬜ not started |
+| **28** | `> help` prints the 12 verbs + meta-commands | `TestREPL_Help` | ✅ done |
 
 ## Phase 29 — `chronicle new <name>`
 
 | Sub | Goal | Acceptance test | Status |
 |---|---|---|---|
-| **29** | `chronicle new <name> --pack frontier --seed X` creates a working world with one command | `TestNewCmd_CreatesWorld` | ⬜ not started |
+| **29** | `chronicle new <name> --pack frontier --seed X` creates a working world with one command | `TestNewCmd_CreatesWorld` | ✅ done |
 
 ## Phase 30 — Player lineage on death
 
@@ -109,12 +109,29 @@ acceptance test, and a status. The full spec is in
 ## Suggested next 3 phases (after this commit lands)
 
 1. **Phase 38 (SQLite test fix).** Trivial one-liner: `db.SetMaxOpenConns(1)` in the test DB. Catches a latent test-infrastructure bug; unblocks the `cmd/chronicle` test suite.
-2. **Phase 28 (REPL `help`).** Tiny addition; the REPL prompt already says "Type 'help' for a command list" but the command doesn't exist. 30 lines + a test.
-3. **Phase 26.D (CourtAction perf).** The 5-Generation test currently times out; the v1 acceptance suite can't run green without it. Optimization: cache candidate partners per location per K ticks.
+2. **Phase 30 (Player lineage on death).** The big one for "die and continue" — auto-succession with the 5 continuation modes (Heir/Family/Character/Observer/End Bloodline) and the legacy record on death.
+3. **Phase 31 (REPL relationship/memory inspection).** `relations <name>` and `memories <name>` commands so the player can see the social graph they're building.
 
 After those three, the path to "playable v1" is:
-- Phase 29 (`chronicle new`)
-- Phase 30 (lineage)
-- Phase 31 (relationship/memory inspection in REPL)
 - Phase 32 (`--no-llm`)
+- Phase 26.D (CourtAction perf — unblocks the v1 acceptance suite)
 - Phase 40 (final acceptance)
+
+## Status after Phase 28 + 29 (this commit)
+
+The user can now play the game end-to-end:
+
+```bash
+./chronicle new mygame --seed 42 -repl
+> help
+> look
+> people
+> talk elena
+> travel blackwater
+> sleep
+> auto-tick on
+> save mygame-saved.db
+> quit
+```
+
+…and resume later with `./chronicle resume mygame.db -repl`.

@@ -191,7 +191,7 @@ func (r *REPL) isGameOver() bool {
 }
 
 // execute parses and runs one command line. First checks
-// for REPL meta-commands (quit, exit, people, auto-tick,
+// for REPL meta-commands (quit, exit, help, people, auto-tick,
 // advance); everything else goes through the intent parser.
 func (r *REPL) execute(ctx context.Context, line string) error {
 	lower := strings.ToLower(line)
@@ -199,6 +199,9 @@ func (r *REPL) execute(ctx context.Context, line string) error {
 	case "quit", "exit":
 		fmt.Fprintln(r.out, "Goodbye.")
 		r.running = false
+		return nil
+	case "help", "?":
+		r.execHelp()
 		return nil
 	case "people":
 		r.execPeople()
@@ -286,6 +289,57 @@ func (r *REPL) execTime() {
 		return
 	}
 	fmt.Fprintf(r.out, "Tick %d (%s)\n", r.world.Tick, r.world.Now.Format("2006-01-02"))
+}
+
+// execHelp prints the REPL's command reference: the 12 spec
+// verbs grouped by category, the meta-commands, and a one-line
+// pointer to the spec for the full grammar. The output is
+// static (no world state), so the help is the same on every
+// prompt. `?` is a short alias for `help`.
+func (r *REPL) execHelp() {
+	fmt.Fprintln(r.out, helpText())
+}
+
+// helpText is the canonical help string printed by `help` and
+// `?`. Pulled out as a function so tests can assert on the
+// exact content and future changes only need to be made in
+// one place.
+func helpText() string {
+	return `Chronicle REPL — commands
+
+Reading
+  look                  Show your current location and the people there.
+  look <name|place>     Show a specific person or location.
+  inspect <name>        Show a person's details (same as "look <name>").
+  people                List all alive people in the world.
+  time                  Show the current sim tick and date.
+
+Acting
+  talk <name>           Talk to a person (creates a memory + trust delta).
+  travel <place>        Travel to a location (advances 1 tick).
+  sleep [hours]         Sleep (default 8 hours; advances time).
+  buy <item> [qty]      Buy from a merchant at your location.
+  sell <item> [qty]     Sell to a merchant at your location.
+  inventory             Show your inventory and coin.
+
+Saving & branching
+  save [path.db]        Snapshot the world to a SQLite file.
+  branch <name>         Save a named branch of the current world.
+  switch <name>         Restore a named branch into the current world.
+  info                  Hint: use "chronicle info <path.db>" from the shell.
+
+Pacing
+  advance day           Advance 1 sim day.
+  advance week          Advance 7 sim days.
+  advance month         Advance 30 sim days.
+  auto-tick on|off      Toggle auto-advance (one tick before each prompt).
+
+Meta
+  help, ?               Show this help text.
+  quit, exit            Leave the REPL.
+
+Tip: type "people" to see who's alive, then "talk <name>" to start a conversation.
+`
 }
 
 // execPeople lists all alive people with their age and

@@ -641,6 +641,201 @@ func TestSave_AutoResumeRequiresResumeFn(t *testing.T) {
 	}
 }
 
+// TestNewCmd_CreatesWorld is the Phase 29 v1 acceptance gate for
+// `chronicle new <name>`. It bootstraps a frontier worldpack with
+// a known seed, snapshots to <name>.db, and asserts the resulting
+// file exists, contains a fully-loaded world (via Restore), and
+// that the world has the expected bootstrap population. The test
+// is the friendly entry point for "I want to play a game": one
+// command creates a save file, replacing the previous two-step
+// `play -seed X && save -out <name>.db` workflow.
+func TestNewCmd_CreatesWorld(t *testing.T) {
+	defer quietStderr(t)()
+
+	packDir := frontierPackDir(t)
+	if _, err := os.Stat(packDir); err != nil {
+		t.Skipf("frontier worldpack not available at %s: %v", packDir, err)
+	}
+
+	tmpDir := t.TempDir()
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
+
+	const (
+		name = "testgame"
+		seed = int64(42)
+	)
+	w, resolved, err := runNew(name, packDir, seed, "", false)
+	if err != nil {
+		t.Fatalf("runNew: %v", err)
+	}
+	if resolved != name+".db" {
+		t.Errorf("resolved = %q, want %q (default <name>.db)", resolved, name+".db")
+	}
+	if _, err := os.Stat(resolved); err != nil {
+		t.Fatalf("expected save at %s, got: %v", resolved, err)
+	}
+	// The returned world is the post-Restore world (proves the
+	// round-trip works).
+	if len(w.People) == 0 {
+		t.Errorf("returned world has 0 people; bootstrap should have populated it")
+	}
+}
+
+// TestNewCmd_CustomOutPath verifies that an explicit -out path is
+// honored and the default <name>.db substitution is skipped.
+func TestNewCmd_CustomOutPath(t *testing.T) {
+	defer quietStderr(t)()
+
+	packDir := frontierPackDir(t)
+	if _, err := os.Stat(packDir); err != nil {
+		t.Skipf("frontier worldpack not available at %s: %v", packDir, err)
+	}
+
+	tmpDir := t.TempDir()
+	customPath := filepath.Join(tmpDir, "my-new-game-2026.db")
+
+	w, resolved, err := runNew("ignored", packDir, 7, customPath, false)
+	if err != nil {
+		t.Fatalf("runNew: %v", err)
+	}
+	if resolved != customPath {
+		t.Errorf("resolved = %q, want %q (caller-supplied)", resolved, customPath)
+	}
+	if _, err := os.Stat(customPath); err != nil {
+		t.Fatalf("expected save at %s, got: %v", customPath, err)
+	}
+	if len(w.People) == 0 {
+		t.Errorf("returned world has 0 people; bootstrap should have populated it")
+	}
+}
+
+// TestNewCmd_MissingNameErrors verifies that `chronicle new` without
+// a name returns a usage error rather than silently creating a
+// default-named world.
+func TestNewCmd_MissingNameErrors(t *testing.T) {
+	defer quietStderr(t)()
+
+	err := runNewCmd([]string{})
+	if err == nil {
+		t.Fatal("expected error for missing <name>, got nil")
+	}
+	if !strings.Contains(err.Error(), "usage") {
+		t.Errorf("error missing 'usage' hint: %v", err)
+	}
+}
+
+// TestNewCmd_SanitizesPathTraversal verifies that a name containing
+// path-traversal sequences is sanitized so the output file lands
+// in the current directory (not in ../../etc). Security check
+// (defense in depth — a malicious pack or shell could otherwise
+// overwrite a system file).
+func TestNewCmd_SanitizesPathTraversal(t *testing.T) {
+	defer quietStderr(t)()
+
+	packDir := frontierPackDir(t)
+	if _, err := os.Stat(packDir); err != nil {
+		t.Skipf("frontier worldpack not available at %s: %v", packDir, err)
+	}
+
+	tmpDir := t.TempDir()
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
+
+	// A name with slashes, dots, and a leading dot. The
+	// sanitizer should strip the leading dot, replace slashes
+	// with underscores, and produce a plain filename.
+	_, resolved, err := runNew("../.badname/foo", packDir, 7, "", false)
+	if err != nil {
+		t.Fatalf("runNew: %v", err)
+	}
+	if filepath.Dir(resolved) != "." && filepath.Dir(resolved) != tmpDir {
+		t.Errorf("resolved %q should be in CWD, got dir %q", resolved, filepath.Dir(resolved))
+	}
+	if strings.Contains(resolved, "..") {
+		t.Errorf("resolved %q still contains '..'; sanitizer failed", resolved)
+	}
+	if _, err := os.Stat(resolved); err != nil {
+		t.Errorf("expected save at %s, got: %v", resolved, err)
+	}
+}
+
+// TestSanitizeWorldName_AllowedCharacters verifies the sanitizer
+// applies the documented three-stage transformation: basename
+// extraction (everything after the last '/' or '\'), then a
+// character allow-list ([A-Za-z0-9_.-] with everything else
+// becoming '_'), then leading/trailing dot stripping. The
+// behavior is "secure by default": path-traversal sequences
+// are stripped to their basename component.
+func TestSanitizeWorldName_AllowedCharacters(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		// Stage 1: pure basename (no separator present).
+		{"mygame", "mygame"},
+		{"my-game", "my-game"},
+		{"my_game", "my_game"},
+		{"my.game", "my.game"},
+		{"MyGame2026", "MyGame2026"},
+		{".bashrc", "bashrc"},
+		{"trailing.", "trailing"},
+
+		// Stage 1: path separator present (basename extraction).
+		// Anything before the LAST separator is discarded.
+		{"a/b/c", "c"},
+		{"a\\b\\c", "c"},
+		{"../etc/passwd", "passwd"},
+		{"/etc/passwd", "passwd"},
+		{"foo/bar", "bar"},
+
+		// Stage 2: character allow-list.
+		{"a b c", "a_b_c"},
+		{"a$b", "a_b"},
+		{"hello!", "hello_"},
+
+		// Stage 3: edge cases that sanitize to empty.
+		{"", "world"},
+		{".", "world"},
+		{"..", "world"},
+		{"...", "world"},
+		{"./foo", "foo"},
+		{"...foo", "foo"},
+	}
+	for _, c := range cases {
+		got := sanitizeWorldName(c.in)
+		if got != c.want {
+			t.Errorf("sanitizeWorldName(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestSanitizeWorldName_LengthCap verifies that very long inputs
+// are truncated to 200 bytes so the resulting <name>.db stays
+// under the typical filesystem NAME_MAX (255 on Linux). A 10 KB
+// name must not produce a 10 KB filename.
+func TestSanitizeWorldName_LengthCap(t *testing.T) {
+	longName := make([]byte, 10*1024)
+	for i := range longName {
+		longName[i] = 'a'
+	}
+	got := sanitizeWorldName(string(longName))
+	if len(got) > 200 {
+		t.Errorf("sanitizeWorldName on 10KB input produced %d bytes; want <= 200", len(got))
+	}
+}
+
 // TestSaveCmd_AutoResumeFlagParses is a CLI-level test that proves
 // the -auto-resume flag is wired correctly through runSaveCmd. It
 // uses the frontier pack (which won't go extinct in 5 ticks, so

@@ -147,6 +147,47 @@ func TestREPL_Time(t *testing.T) {
 	}
 }
 
+// TestREPL_Help verifies that the `help` meta-command prints
+// the canonical command reference covering the 12 spec verbs,
+// the meta-commands, and the pacing knobs. The output is
+// deterministic (no world state), so the test asserts on a
+// handful of substring invariants.
+func TestREPL_Help(t *testing.T) {
+	w := newTestWorld()
+	out := runREPL(t, w, "help\nquit\n", Options{})
+	for _, want := range []string{
+		"look",
+		"talk",
+		"travel",
+		"sleep",
+		"inventory",
+		"save",
+		"branch",
+		"switch",
+		"advance day",
+		"auto-tick",
+		"quit",
+		"people",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestREPL_HelpQuestionAlias verifies that `?` is accepted as a
+// short alias for `help` (the two should produce identical output).
+func TestREPL_HelpQuestionAlias(t *testing.T) {
+	w := newTestWorld()
+	out := runREPL(t, w, "?\nquit\n", Options{})
+	if !strings.Contains(out, "look") {
+		t.Errorf("'?' alias output missing 'look':\n%s", out)
+	}
+	if !strings.Contains(out, "quit") {
+		t.Errorf("'?' alias output missing 'quit':\n%s", out)
+	}
+}
+
 // TestREPL_People verifies that "people" lists all alive
 // people with their age and location.
 func TestREPL_People(t *testing.T) {

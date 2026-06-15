@@ -70,6 +70,12 @@ func main() {
 	// anything else (including no args) defaults to the play workflow.
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "new":
+			if err := runNewCmd(os.Args[2:]); err != nil {
+				fmt.Fprintf(os.Stderr, "chronicle: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		case "resume":
 			if err := runResumeCmd(os.Args[2:]); err != nil {
 				fmt.Fprintf(os.Stderr, "chronicle: %v\n", err)
@@ -106,6 +112,190 @@ func main() {
 		fmt.Fprintf(os.Stderr, "chronicle: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// runNewCmd is the "create a new world" workflow. The user picks
+// a name, a worldpack, and a seed; Chronicle bootstraps a world
+// from the pack, runs 0 ticks (so the world is at bootstrap state),
+// and writes the result to a SQLite snapshot at <name>.db (or the
+// path given by -out). With -repl, it then drops the user into
+// the in-game REPL.
+//
+// Usage:
+//
+//	chronicle new <name> [flags]
+//
+// Flags:
+//
+//	-pack <dir>   worldpack directory (default: worldpacks/frontier)
+//	-seed <n>     world seed (default: 12345)
+//	-out <path>   output snapshot path (default: <name>.db)
+//	-repl         drop into the in-game REPL after creating the world
+//
+// The new subcommand is the friendly entry point for "I want to
+// play a game": one command creates a save file you can return to
+// later. Before this, the workflow was `chronicle play -seed X
+// && chronicle save -out <name>.db`, which required two commands
+// and remembering the seed-derived world-id for the save path.
+func runNewCmd(args []string) error {
+	fs := flag.NewFlagSet("new", flag.ContinueOnError)
+	packDir := fs.String("pack", "worldpacks/frontier", "Path to worldpack directory containing the six YAML files")
+	seed := fs.Int64("seed", 12345, "World seed for deterministic RNG")
+	outPath := fs.String("out", "", "Output snapshot path; default is <name>.db")
+	replFlag := fs.Bool("repl", false, "If set, drop into the in-game REPL after creating the world")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	positional := fs.Args()
+	if len(positional) < 1 {
+		return fmt.Errorf("usage: chronicle new <name> [flags]\n\n  <name> is the human-readable world name. The save file is written\n  to <name>.db (or the path given by -out).")
+	}
+	name := positional[0]
+	_, _, err := runNew(name, *packDir, *seed, *outPath, *replFlag)
+	return err
+}
+
+// runNew is the testable core of the new subcommand. It calls
+// runPlay with 0 ticks, then saves the result to <outPath>
+// (defaulting to <name>.db when outPath is empty). The world ID
+// is derived from the seed (8 hex chars), not the name — names
+// are not unique. The returned world is the post-save state
+// (i.e. the loaded-from-DB world, so the caller can chain a
+// REPL entry or further operations on a fully-validated state).
+func runNew(name, packDir string, seed int64, outPath string, enterRepl bool) (*core.World, string, error) {
+	// Default the output path to <name>.db if the caller didn't
+	// specify one. Sanitize the name to avoid path traversal: a
+	// name like "../foo" would otherwise let a user write outside
+	// the current directory. The set of allowed characters is
+	// [A-Za-z0-9_-] plus the dot; anything else is replaced with
+	// an underscore.
+	if outPath == "" {
+		outPath = sanitizeWorldName(name) + ".db"
+	}
+	w, err := runPlay(packDir, 0, seed)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := writeSnapshot(outPath, w); err != nil {
+		return nil, "", err
+	}
+	// Re-open the DB and Restore so the returned world is
+	// guaranteed to be a faithful representation of what the
+	// user will see on resume. This exercises the full
+	// round-trip and catches any Snapshot/Restore drift. Cheap
+	// (one open + read of a freshly-written file) and the
+	// right thing for a v1 entry point.
+	loaded, err := readSnapshot(outPath)
+	if err != nil {
+		return nil, "", err
+	}
+	if enterRepl {
+		return loaded, outPath, enterREPL(loaded)
+	}
+	return loaded, outPath, nil
+}
+
+// writeSnapshot opens path, migrates, snapshots w, and closes the
+// DB. Errors from each step are wrapped with the step name so the
+// caller can tell which phase failed. The DB is closed via defer
+// (close errors are rare and not actionable; the first close in
+// the happy path is enough).
+func writeSnapshot(path string, w *core.World) error {
+	db, err := persistence.Open(path)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	if err := db.Snapshot(w); err != nil {
+		return fmt.Errorf("snapshot: %w", err)
+	}
+	return nil
+}
+
+// readSnapshot opens path, migrates, restores into a fresh world,
+// and closes the DB. Used by `chronicle new` to verify the just-
+// written snapshot is a faithful round-trip; the returned world
+// is what `chronicle resume` would see.
+func readSnapshot(path string) (*core.World, error) {
+	db, err := persistence.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	loaded := core.NewWorld("", 0, time.Time{})
+	if err := db.Restore(loaded); err != nil {
+		return nil, fmt.Errorf("restore: %w", err)
+	}
+	return loaded, nil
+}
+
+// sanitizeWorldName turns an arbitrary user-supplied name into a
+// safe filename component. The transformation has three stages:
+//
+//  1. Extract the basename: take everything after the LAST '/'
+//     or '\' (or the whole string if no separator is present).
+//     This neutralizes path-traversal attacks like "../etc/passwd"
+//     (the result is "passwd", not "_etc_passwd") and absolute
+//     paths like "/etc/passwd" (the result is "passwd").
+//  2. Allow-list the characters: keep [A-Za-z0-9_.-], replace
+//     everything else with an underscore. Spaces, Unicode, and
+//     shell metacharacters are neutralized.
+//  3. Strip leading and trailing dots (no hidden files like
+//     ".bashrc" or trailing-dot Windows quirks), then cap the
+//     length at 200 bytes (well under Linux's NAME_MAX of 255).
+//
+// If the input sanitizes to an empty string, "world" is returned
+// as a default. The set of allowed characters is deliberately
+// narrow; users who want a richer name (e.g. Unicode) can pass
+// -out explicitly to bypass the default naming.
+func sanitizeWorldName(name string) string {
+	const maxLen = 200
+	if name == "" {
+		return "world"
+	}
+	// Stage 1: basename extraction. Take everything after the
+	// last path separator. This is the standard defense against
+	// path-traversal: "../foo" -> "foo", "a/b/c" -> "c", "" -> "".
+	for i := len(name) - 1; i >= 0; i-- {
+		if name[i] == '/' || name[i] == '\\' {
+			name = name[i+1:]
+			break
+		}
+	}
+	// Stage 2: character allow-list.
+	out := make([]byte, 0, len(name))
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c >= 'A' && c <= 'Z',
+			c >= 'a' && c <= 'z',
+			c >= '0' && c <= '9',
+			c == '_' || c == '-' || c == '.':
+			out = append(out, c)
+		default:
+			out = append(out, '_')
+		}
+		if len(out) >= maxLen {
+			break
+		}
+	}
+	// Stage 3: strip leading and trailing dots.
+	for len(out) > 0 && out[0] == '.' {
+		out = out[1:]
+	}
+	for len(out) > 0 && out[len(out)-1] == '.' {
+		out = out[:len(out)-1]
+	}
+	if len(out) == 0 {
+		return "world"
+	}
+	return string(out)
 }
 
 // runPlayCmd is the default "play from scratch" workflow.
