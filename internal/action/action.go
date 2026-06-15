@@ -88,17 +88,43 @@ type Result struct {
 // Engine is NOT safe for concurrent use. The current caller
 // (the REPL) is single-threaded, matching the Narrator's
 // concurrency contract.
+//
+// Phase 31: tickFn is the per-tick callback (typically
+// tick.Simulation.Tick on the same world). When set, every
+// call to advanceTick(n) invokes it n times — running the
+// full engine pipeline (population/relationship/goal/memory
+// + economy + event) per tick, so player actions like
+// travel and sleep trigger the same world evolution as a
+// tick from runPlay. When nil, advanceTick falls back to a
+// clock-only update (Tick and Now advanced, no engine
+// side-effects) — useful for tests and for code paths that
+// want time advancement without engine side-effects.
 type Engine struct {
 	world    *core.World
 	narrator *narrator.Narrator
+	tickFn   func() error
 }
 
 // New constructs an Action Engine. The world is required and
 // is mutated in place as actions resolve. The narrator is
 // optional; when nil, the engine uses short template strings
-// for all narration (no LLM calls, no cache).
+// for all narration (no LLM calls, no cache). To enable
+// full-pipeline time advancement (Phase 31), call SetTickFn
+// with the same function the REPL uses for auto-tick.
 func New(w *core.World, n *narrator.Narrator) *Engine {
 	return &Engine{world: w, narrator: n}
+}
+
+// SetTickFn wires the per-tick callback. Pass the same
+// `func() error` that the REPL hands to its auto-tick loop
+// (typically `func() error { return sim.Tick(w) }`). After
+// this call, every advanceTick(n) inside the engine runs
+// the full tick pipeline n times, mirroring the spec's
+// "for each tick in the elapsed time, run full tick
+// pipeline" (SIMULATION_TICK_SPEC.md §5.3). Calling with nil
+// reverts to clock-only advancement.
+func (e *Engine) SetTickFn(fn func() error) {
+	e.tickFn = fn
 }
 
 // Resolve dispatches an Intent to its per-action handler.
@@ -300,7 +326,12 @@ func (e *Engine) resolveTravel(ctx context.Context, target string) Result {
 
 	// Narration: delegate to the Narrator if present.
 	text := e.renderTravel(ctx, l)
-	return Result{OK: true, Text: text, TicksAdvanced: 1}
+	// Phase 31: append an "elapsed time" annotation so the
+	// player sees the sim-time cost of traveling. Mirrors
+	// the "M day(s) elapsed" line on resolveSleep; both
+	// duration-bearing actions are now consistent in style
+	// (fmt.Sprintf + trailing period).
+	return Result{OK: true, Text: text + fmt.Sprintf(" (1 day elapsed, now tick %d).", e.world.Tick), TicksAdvanced: 1}
 }
 
 // resolveSleep handles "sleep" — advances time by
@@ -321,9 +352,16 @@ func (e *Engine) resolveSleep(hours int) Result {
 		ticks = 1
 	}
 	e.advanceTick(ticks)
+	// Phase 31: show days elapsed, not raw tick numbers, so
+	// the player sees the simulated-time cost of sleeping
+	// (a full day for 8h, 7 days for a week, etc.).
+	dayWord := "days"
+	if ticks == 1 {
+		dayWord = "day"
+	}
 	return Result{
 		OK:            true,
-		Text:          fmt.Sprintf("You sleep for %d hours. (tick %d)", hours, e.world.Tick),
+		Text:          fmt.Sprintf("You sleep for %d hours (%d %s elapsed, now tick %d).", hours, ticks, dayWord, e.world.Tick),
 		TicksAdvanced: ticks,
 	}
 }
@@ -655,14 +693,44 @@ func (e *Engine) player() *core.Person {
 }
 
 // advanceTick advances the world's tick counter and clock
-// by the given number of ticks. This mirrors what
-// tick.Simulation.Tick does, but the action engine doesn't
-// have a full simulation (it operates per-action). The REPL
-// can override this by passing a TickFn that does the full
-// simulation; for now, the action engine's advanceTick is
-// sufficient for Phase 17.5 (time advancement only, no
-// engine side effects).
+// by the given number of ticks. When a TickFn is set
+// (Phase 31), it is called n times — each call runs the
+// full tick pipeline (sim.Tick increments w.Tick and
+// w.Now internally, plus all engines mutate state). When
+// no TickFn is set, advanceTick falls back to clock-only
+// advancement: w.Tick += n and w.Now += n days. This
+// fallback keeps older test code working unchanged.
+//
+// Errors from the TickFn are NOT returned from this helper
+// (the helper's signature is void for backward compat).
+// Callers that need error propagation can wrap advanceTick
+// with a function that returns error, or set the world's
+// state directly. Phase 31 v1 swallows TickFn errors so
+// the player sees the action's primary effect even if a
+// downstream engine hiccuped; the underlying sim.Tick
+// already has its own error path for unrecoverable engine
+// failures.
 func (e *Engine) advanceTick(n int64) {
+	if n <= 0 {
+		return
+	}
+	if e.tickFn != nil {
+		// Full-pipeline mode: invoke the per-tick callback
+		// n times. Each invocation increments w.Tick and
+		// w.Now (sim.Tick does that internally) and runs
+		// every engine in the simulation. This is the
+		// "for each tick in the elapsed time, run full
+		// tick pipeline" path from SIMULATION_TICK_SPEC.md
+		// §5.3, applied to player duration actions.
+		for i := int64(0); i < n; i++ {
+			_ = e.tickFn()
+		}
+		return
+	}
+	// Clock-only fallback: keep w.Tick and w.Now in sync
+	// without invoking any engine. Used by tests that want
+	// a deterministic "time passes" without engine mutation
+	// (e.g., action_test.go's pre-Phase 31 tests).
 	e.world.Tick += n
 	e.world.Now = e.world.Now.AddDate(0, 0, int(n))
 }

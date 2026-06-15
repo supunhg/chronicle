@@ -1270,6 +1270,15 @@ func enterREPL(w *core.World, packDir string) error {
 	// world, callers can set w.PlayerID before entering the
 	// REPL.
 	act := action.New(w, nar)
+	// Phase 31: wire the same per-tick callback that auto-tick
+	// uses into the action engine. After this call, every
+	// travel/sleep action runs the full tick pipeline (not
+	// just the clock) so NPCs keep producing food, forming
+	// relationships, and dying while the player is on the
+	// road. Determinism is preserved: the same sim.Tick
+	// (same engines, same world) is invoked the same number
+	// of times for the same action sequence.
+	act.SetTickFn(tickFn)
 
 	r := repl.New(w, parser, repl.Options{
 		TickFn:   tickFn,
