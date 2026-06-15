@@ -149,6 +149,18 @@ func (r *REPL) Run(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		// Phase 30: detect player death BEFORE the generic
+		// isGameOver check. If the player died, the lineage
+		// flow handles the transition (heir / observer / end
+		// bloodline). isGameOver is the fallback when the
+		// lineage flow ended the chronicle or when no player
+		// was ever set and everyone else died.
+		if err := r.checkPlayerDeath(); err != nil {
+			return err
+		}
+		if r.bloodlineEnded {
+			return nil
+		}
 		if r.isGameOver() {
 			fmt.Fprintln(r.out, "\nEveryone has died. The world continues without you.")
 			return nil
@@ -160,15 +172,14 @@ func (r *REPL) Run(ctx context.Context) error {
 			if err := r.tickFn(); err != nil {
 				return fmt.Errorf("repl: auto-tick: %w", err)
 			}
-		}
-		// Phase 30: detect player death before showing the prompt.
-		// If the player died during the previous tick (or auto-tick
-		// just ran), surface the death flow and pick a successor.
-		if err := r.checkPlayerDeath(); err != nil {
-			return err
-		}
-		if r.bloodlineEnded {
-			return nil
+			// Re-check death after auto-tick (a tick may have
+			// killed the player).
+			if err := r.checkPlayerDeath(); err != nil {
+				return err
+			}
+			if r.bloodlineEnded {
+				return nil
+			}
 		}
 		fmt.Fprint(r.out, "> ")
 		if !r.in.Scan() {
@@ -231,11 +242,14 @@ func (r *REPL) checkPlayerDeath() error {
 	// Player is dead. Score the top candidates and render.
 	topCandidates := lineage.ScoreSuccessors(r.world, r.world.PlayerID, 5)
 	if len(topCandidates) == 0 {
-		// No living candidates — chronicle ends here.
+		// No living candidates — chronicle ends here. Print a
+		// clear closing message so the player understands the
+		// game is over (not just a silent exit).
 		fmt.Fprintln(r.out, lineage.RenderDeathMessage(r.world, r.world.PlayerID, nil, nil))
 		if legacy := lineage.ComputeLegacy(r.world, r.world.PlayerID); legacy != nil {
 			fmt.Fprintln(r.out, lineage.RenderLegacyRecord(legacy))
 		}
+		fmt.Fprintln(r.out, "\nThe chronicle ends here.")
 		r.bloodlineEnded = true
 		return nil
 	}
@@ -258,6 +272,20 @@ func (r *REPL) checkPlayerDeath() error {
 			r.world.PlayerID = heir.ID
 			fmt.Fprintf(r.out, "\nYou are now %s.\n", heir.Name)
 			return nil
+		}
+		// Numeric input picks a candidate by index (1-based).
+		// The "successors" sub-prompt just shows the list; the
+		// player can then type a number here to pick. This
+		// keeps the prompt loop simple: any unrecognized text
+		// falls through to the "Unknown choice" error.
+		if idx, err := strconv.Atoi(choice); err == nil {
+			if idx >= 1 && idx <= len(topCandidates) {
+				r.world.PlayerID = topCandidates[idx-1].Person.ID
+				fmt.Fprintf(r.out, "\nYou are now %s.\n", topCandidates[idx-1].Person.Name)
+				return nil
+			}
+			fmt.Fprintf(r.out, "Invalid choice %d (have %d candidates).\n", idx, len(topCandidates))
+			continue
 		}
 		lower := strings.ToLower(choice)
 		switch lower {

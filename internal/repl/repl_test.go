@@ -583,6 +583,15 @@ func TestREPL_ContextCancel(t *testing.T) {
 
 // TestREPL_GameOver verifies that the REPL exits with a
 // clear message when the world has no alive people.
+//
+// Phase 30 update: when the player is dead and there are no
+// living candidates, the lineage flow handles the exit with
+// "The chronicle ends here." (set r.bloodlineEnded = true and
+// return). The old isGameOver path's "Everyone has died."
+// message is now the fallback for the no-PlayerID case
+// (everyone died but no lineage flow fired). The world built
+// by newTestWorld has alice as the PlayerID, so the lineage
+// path fires first.
 func TestREPL_GameOver(t *testing.T) {
 	w := newTestWorld()
 	// Mark everyone dead.
@@ -590,8 +599,25 @@ func TestREPL_GameOver(t *testing.T) {
 		p.Alive = false
 	}
 	out := runREPL(t, w, "time\n", Options{})
+	// The lineage path produces "The chronicle ends here."
+	if !strings.Contains(out, "The chronicle ends here") {
+		t.Errorf("output missing 'The chronicle ends here': %q", out)
+	}
+}
+
+// TestREPL_GameOverNoPlayer verifies the fallback path:
+// when the world has no alive people AND no PlayerID is
+// set, the isGameOver branch fires with "Everyone has died."
+// (the lineage flow only runs when there's a dead player).
+func TestREPL_GameOverNoPlayer(t *testing.T) {
+	w := newTestWorld()
+	w.PlayerID = "" // no player → lineage flow is a no-op
+	for _, p := range w.People {
+		p.Alive = false
+	}
+	out := runREPL(t, w, "time\n", Options{})
 	if !strings.Contains(out, "Everyone has died") {
-		t.Errorf("output missing 'Everyone has died': %q", out)
+		t.Errorf("output missing 'Everyone has died' (no-player game-over fallback): %q", out)
 	}
 }
 
