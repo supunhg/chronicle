@@ -16,9 +16,12 @@ var worldRulesSQL string
 //go:embed migrations/0003_item_metadata.sql
 var itemMetadataSQL string
 
+//go:embed migrations/0004_full_world_roundtrip.sql
+var fullWorldRoundtripSQL string
+
 // CurrentVersion is the highest schema version Migrate will apply.
 // Increment this when adding a new migration in Migrations below.
-const CurrentVersion = 3
+const CurrentVersion = 4
 
 // Migrations lists every schema migration in version order. Index N is
 // migration N+1. Each entry is a self-contained SQL script that, when
@@ -30,10 +33,16 @@ const CurrentVersion = 3
 // Phase 7: v2 adds world_rules for persisting WorldRules.
 // Phase 18: v3 adds weight/value/max_durability columns to the
 //          inventory table for the new core.Item struct.
+// Phase 26: v4 extends locations (settlement/prices/last_shortage_tick),
+//          factions (color/base_location/rivals/allies), people
+//          (is_merchant), events (location), and adds the items
+//          catalog table so a save/load round-trip preserves every
+//          field core.WorldHash covers.
 var Migrations = []string{
-	schemaSQL,        // v1
-	worldRulesSQL,    // v2
-	itemMetadataSQL,  // v3
+	schemaSQL,             // v1
+	worldRulesSQL,         // v2
+	itemMetadataSQL,       // v3
+	fullWorldRoundtripSQL, // v4
 }
 
 // versionTableDDL creates the schema_version table if it does not

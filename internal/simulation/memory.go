@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/chronicle-dev/chronicle/internal/core"
 )
@@ -65,6 +66,12 @@ func (m *MemoryEngine) Tick(w *core.World) error {
 	m.recordDeaths(w)
 	m.recordBirths(w)
 	m.decayMemories(w)
+	// Phase 26 Part B: enforce the live-memory cap so the
+	// memory log stays bounded across long runs. The trim
+	// runs AFTER the engine has finished appending for this
+	// tick, so this tick's memories always survive (they are
+	// the newest). No-op when the log is under MaxLiveMemories.
+	TrimMemories(w)
 	return nil
 }
 
@@ -73,8 +80,12 @@ func (m *MemoryEngine) Tick(w *core.World) error {
 // memory targets the deceased; the owner is the spouse. No
 // relationship deltas are applied (see MemoryEngine doc comment
 // for rationale).
+//
+// Iteration is over sortedPeople(w) (sorted by ID) so the order
+// of w.Memories appends is deterministic. See recordBirths and
+// sortedPeople for the rationale.
 func (m *MemoryEngine) recordDeaths(w *core.World) {
-	for _, p := range w.People {
+	for _, p := range sortedPeople(w) {
 		// Both conditions must hold: DeathTick was set this tick
 		// (PopulationEngine.mortality sets it) AND the person is
 		// now marked as not alive. The Alive check guards against
@@ -115,8 +126,12 @@ func (m *MemoryEngine) recordDeaths(w *core.World) {
 // experienced the birth). Father gets TrustDelta=+15 (slightly
 // weaker — he may not have been present). These are Phase 15
 // v1 values; worldpacks can override.
+//
+// Iteration is over sortedPeople(w) (sorted by ID) so the order
+// of w.Memories appends is deterministic. See recordDeaths for
+// the rationale.
 func (m *MemoryEngine) recordBirths(w *core.World) {
-	for _, p := range w.People {
+	for _, p := range sortedPeople(w) {
 		if p.BirthTick != w.Tick || !p.Alive {
 			continue
 		}
@@ -181,4 +196,25 @@ func (m *MemoryEngine) applyDeltas(w *core.World, mem core.Memory, targetID stri
 		return
 	}
 	m.RelationshipEngine.ApplyMemoryDeltas(w, mem, targetID)
+}
+
+// sortedPeople returns w.People as a slice sorted by ID. The
+// MemoryEngine iterates people in this order so the order of
+// w.Memories appends is independent of Go's randomized map
+// iteration. The Phase 25 WorldHash sorts w.Memories before
+// hashing, so the hash is already canonical; this helper makes
+// the engine behavior provably deterministic at the slice level
+// too.
+//
+// Cost: O(n log n) per Tick for a Tick in which a birth or
+// death occurs (which is rare — one or two per year). For
+// ticks with no births/deaths the helper is still called but
+// its output is discarded by the early-`continue` filter.
+func sortedPeople(w *core.World) []*core.Person {
+	out := make([]*core.Person, 0, len(w.People))
+	for _, p := range w.People {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }

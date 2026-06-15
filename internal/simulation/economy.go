@@ -26,6 +26,7 @@ package simulation
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/chronicle-dev/chronicle/internal/core"
 )
@@ -202,7 +203,18 @@ func (e *EconomyEngine) runConsumption(w *core.World) {
 	// LastShortageTick=0 is the "never in shortage" sentinel
 	// (set at bootstrap); a non-zero value means we have
 	// recorded a shortage in some previous tick.
-	for _, loc := range w.Locations {
+	//
+	// Phase 26 Part E: iterate locations in sorted ID order so
+	// the order of memory appends (and LastShortageTick
+	// mutations) is deterministic. Go map iteration is
+	// randomized.
+	locIDs := make([]string, 0, len(w.Locations))
+	for id := range w.Locations {
+		locIDs = append(locIDs, id)
+	}
+	sort.Strings(locIDs)
+	for _, locID := range locIDs {
+		loc := w.Locations[locID]
 		if loc.Settlement.Food >= EconomyShortageThreshold {
 			continue
 		}
@@ -244,7 +256,19 @@ func (e *EconomyEngine) runConsumption(w *core.World) {
 // 1 coin (so the world is still playable, just with placeholder
 // prices).
 func (e *EconomyEngine) runPriceRecalc(w *core.World) {
-	for _, loc := range w.Locations {
+	// Phase 26 Part E: iterate locations in sorted ID order.
+	// The Prices writes are commutative (each location's
+	// prices only depend on its own Settlement), but a
+	// deterministic iteration order makes engine behavior
+	// provably order-insensitive and matches the pattern used
+	// by runConsumption.
+	locIDs := make([]string, 0, len(w.Locations))
+	for id := range w.Locations {
+		locIDs = append(locIDs, id)
+	}
+	sort.Strings(locIDs)
+	for _, locID := range locIDs {
+		loc := w.Locations[locID]
 		loc.Prices.Food = recomputePrice(w, core.ResourceFood, loc.Settlement.Food)
 		loc.Prices.Wood = recomputePrice(w, core.ResourceWood, loc.Settlement.Wood)
 		loc.Prices.Iron = recomputePrice(w, core.ResourceIron, loc.Settlement.Iron)

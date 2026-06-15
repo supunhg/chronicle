@@ -5,37 +5,51 @@
 > continue existing long after the player leaves or dies.
 
 Chronicle is a Go implementation of the spec in
-[`chronicle-spec.md`](./chronicle-spec.md) and the determinism contract
-in [`SIMULATION_TICK_SPEC.md`](./SIMULATION_TICK_SPEC.md). The
-architectural intent is in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+[`ARCHITECTURE.md`](./ARCHITECTURE.md). The determinism contract is in
+[`docs/DETERMINISM.md`](./docs/DETERMINISM.md). The simulation tick order
+is in [`SIMULATION_TICK_SPEC.md`](./SIMULATION_TICK_SPEC.md).
 
----
+> **Status:** Phases 1–25 committed. Phase 26 (Stability & Persistence
+> Validation) in progress. The simulation substrate is solid; the player
+> experience layer (lineage transfer, `chronicle new`, `help` command,
+> LLM-driven narration) is the v1 work remaining. See
+> [`PHASES.md`](./PHASES.md) for the checklist.
 
-## Current Status (Phases 1–15)
+## What's in the box
 
-**Core simulation + persistence + CLI are done and tested.** The full
-v1 from the spec is not yet complete — LLM integration, the economy
-engine, the event engine, and goal-engine action selection are still
-pending.
+**Simulation core** — all 7 production engines wired through a
+deterministic tick loop:
 
-What works today:
-- **Population engine** — aging, mortality, births, migration, family trees
-- **Relationship engine** — co-location formation, axis decay toward neutral, O(1) memory-delta application
-- **Memory engine** — causally-anchored birth/death records
-- **SQLite persistence** — world_meta, people, world_rules, relationships, memories
-- **Five CLI subcommands** — `play`, `save`, `resume`, `info`, `diff`
-- **Auto-resume hook** — automatically resume a saved DB on game-over
-- **~50+ tests** — all passing; `go build` and `go vet` clean
+- **Population** — aging, mortality, births, migration, family trees
+- **Relationship** — co-location bond formation, axis decay toward neutral, O(1) memory-delta application
+- **Marriage** — pair matching with trust/age/class constraints
+- **Memory** — causally-anchored birth/death records with TrustDelta/RelationshipDelta baked into the relationship cache
+- **Goal** — utility AI with hierarchical goals and a 3-layer action system
+- **Economy** — closed production/consumption loops, price recalc, shortage detection
+- **Event** — 4 state-driven rules (Famine, Crime, Political, Religious) with per-(rule, location) cooldown
 
-What's still pending for full v1:
-- LLM integration (Intent LLM, Narrator LLM, World AI)
-- Economy engine (closed production loops)
-- Event engine
-- Goal engine action selection (3-layer system, utility scoring)
-- Branching timelines (`chronicle branch`, `chronicle switch`)
-- In-game REPL / TUI
+**Persistence** — SQLite with 4 migrations; full save/load round-trip
+preserves every field `core.WorldHash` covers.
 
----
+**CLI** — 6 subcommands: `play` (default), `save`, `resume`, `info`,
+`diff`, `doctor`. All play-tick subcommands support `-repl`.
+
+**In-game REPL** — fully functional. 12 verbs (`look`, `inspect`, `talk`,
+`travel`, `sleep`, `inventory`, `time`, `save`, `buy`, `sell`, `branch`,
+`switch`) plus meta-commands (`people`, `auto-tick on|off`, `advance
+day|week|month`, `quit`).
+
+**LLM layer** — OpenAI-compatible client (`internal/llm`), env-var auth
+(`OPENCODE_ZEN_API_KEY`), `chronicle doctor` to validate. Narrator uses
+templates by default; LLM-gated for significant events. Intent parser
+falls back to the LLM for unknown verbs.
+
+**Worldpack** — `worldpacks/frontier` ("The Free Marches") with 150 NPCs,
+4 factions, 1 town + 4 villages + monastery + fort + forest + river.
+
+**Determinism** — `core.WorldHash` (SHA256) is the canonical state
+fingerprint; `TestDeterministicReplay` and `TestDifferentSeedsDiverge`
+are the v1 acceptance gates.
 
 ## Build, Test, Run
 
@@ -44,9 +58,12 @@ What's still pending for full v1:
 make build                       # produces ./chronicle
 # or: go build -o chronicle ./cmd/chronicle
 
-# Test
-make test                        # runs all tests
-# or: go test ./...
+# Run all tests (slow integration tests included; budget ~30 min)
+make test
+# or: go test -count=1 -timeout 30m ./...
+
+# Run just the fast unit tests
+go test -count=1 -short ./...
 
 # Vet
 make vet
@@ -63,11 +80,15 @@ make tidy
 ./chronicle -ticks 100 -seed 12345
 ./chronicle -pack worldpacks/frontier -ticks 365 -seed 7
 
+# Play and drop into the in-game REPL after the initial ticks
+./chronicle -ticks 100 -seed 12345 -repl
+
 # Save a snapshot
 ./chronicle save -ticks 100 -seed 12345 -out myrun.db
 
-# Resume from a snapshot
+# Resume from a snapshot (with optional -repl)
 ./chronicle resume myrun.db -ticks 50
+./chronicle resume myrun.db -ticks 50 -repl
 
 # Inspect a snapshot (read-only)
 ./chronicle info myrun.db
@@ -75,32 +96,61 @@ make tidy
 # Diff two snapshots
 ./chronicle diff run1.db run2.db
 
+# Check LLM config + API key + endpoint
+./chronicle doctor
+
 # Auto-resume on extinction
 ./chronicle save -ticks 3650 -auto-resume -auto-resume-ticks 100 -seed 12345
 ```
 
+### In-Game REPL
+
+After `./chronicle -repl`, you can type any of:
+
+```
+> look
+> look alice
+> inspect marcus
+> talk elena
+> travel blackwater
+> sleep
+> sleep 8
+> inventory
+> time
+> save [path.db]
+> buy bread
+> sell sword
+> branch before_war
+> switch merchant_path
+> people
+> auto-tick on
+> auto-tick off
+> advance day
+> advance week
+> advance month
+> quit
+```
+
+Aliases: `i` → `inventory`, `date` → `time`.
+
 All output goes to **stderr** (metadata, progress, summaries). The
 binary is silent on stdout.
 
----
-
 ## API Keys
 
-The LLM integration is not yet implemented (Phase 17+). The current
-simulation is fully template-based and **does not require any API key**.
+The LLM integration is partial. The current simulation is fully
+template-based and **does not require any API key**.
 
-When the LLM layer is added, the spec calls for OpenCode Zen with a
-single env var:
+To enable the LLM-gated narration path (talk events):
 
 ```bash
 export OPENCODE_ZEN_API_KEY="sk-..."
-# or whatever key convention OpenCode Zen uses at integration time
+# (or whatever key convention OpenCode Zen uses)
 ```
 
-The `chronicle doctor` command (planned) will check the key and
-endpoint reachability.
-
----
+The `chronicle doctor` command checks the key and endpoint reachability.
+A `--no-llm` flag for explicit disable is on the roadmap
+([`PHASES.md`](./PHASES.md) Phase 32).
 
 ## Project Layout
 
@@ -108,30 +158,34 @@ endpoint reachability.
 chronicle/
 ├── cmd/chronicle/         # main entry point + CLI subcommands
 ├── internal/
-│   ├── core/              # domain types (World, Person, Relationship, Memory, …)
+│   ├── action/            # action engine (talk, travel, sleep, buy, sell, save, branch, switch)
+│   ├── core/              # domain types (World, Person, Relationship, Memory, ...)
+│   ├── intent/            # intent parser (rule-based + LLM fallback)
+│   ├── llm/               # OpenCode Zen client, config, doctor
+│   ├── narrator/          # template renderer + LLM-gated narration
 │   ├── persistence/       # SQLite-backed storage + migrations
-│   ├── simulation/        # engines: Population, Relationship, Memory, Goal
+│   ├── repl/              # in-game REPL (12 verbs + auto-tick + advance)
+│   ├── simulation/        # 7 engines + marriage
 │   ├── tick/              # orchestration layer + deterministic RNG
 │   └── worldpack/         # YAML worldpack loader + bootstrap
 ├── worldpacks/frontier/   # the v1 worldpack ("The Free Marches")
-├── chronicle-spec.md      # full v1 spec
-├── SIMULATION_TICK_SPEC.md # determinism contract
-├── ARCHITECTURE.md        # architectural intent
+├── docs/DETERMINISM.md    # determinism contract
+├── SIMULATION_TICK_SPEC.md
+├── ARCHITECTURE.md        # canonical v1 spec (vision + design + DoD)
+├── PHASES.md              # v1 phase checklist
 ├── go.mod
 ├── go.sum
 └── Makefile
 ```
 
----
-
 ## Determinism
 
 The simulation is fully deterministic given identical
 `(world_seed, tick, input state)`. RNG is seeded by
-`(worldSeed, tick, entityID)` per `SIMULATION_TICK_SPEC.md §3`. No
-global `math/rand`, no `time.Now()` in engines.
-
----
+`(worldSeed, tick, entityID)` per `docs/DETERMINISM.md §3`. No
+global `math/rand`, no `time.Now()` in engines. `core.WorldHash` is the
+canonical fingerprint for replay validation, save/load verification, and
+branch divergence detection.
 
 ## License
 

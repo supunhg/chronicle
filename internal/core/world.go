@@ -98,6 +98,25 @@ type World struct {
 	// penalty, or a TheftWave might increment a crime counter
 	// on a location). Append-only.
 	Events []Event
+
+	// ArchivedEvents is the retention buffer for events that
+	// have been aged out of Events to keep the live set bounded.
+	// Phase 26 v1: the EventEngine trims Events to at most
+	// simulation.MaxLiveEvents entries; the oldest excess are
+	// moved here. The archive grows unbounded in v1 (a future
+	// phase may add a cap). The archive is intentionally NOT
+	// part of core.WorldHash's scope — the hash captures the
+	// "active simulation state", and archived events are no
+	// longer affecting any engine. Persistence does not
+	// round-trip the archive (a save/load cycle starts with
+	// an empty archive); the archive is a transient buffer.
+	ArchivedEvents []Event
+
+	// ArchivedMemories is the retention buffer for memories
+	// that have been aged out of Memories. Symmetric with
+	// ArchivedEvents; same cap model and same exclusion from
+	// the hash.
+	ArchivedMemories []Memory
 }
 
 // Item represents a single item type in the world. The same

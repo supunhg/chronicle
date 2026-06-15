@@ -97,7 +97,18 @@ func (r *RelationshipEngine) formRelationships(w *core.World) {
 	}
 
 	// For each location, iterate over pairs in sorted ID order.
-	for _, people := range byLocation {
+	// Phase 26 Part E: iterate locations in sorted ID order so the
+	// append order to w.Relationships is deterministic. Go map
+	// iteration is randomized, and the per-location inner sort
+	// only covers pairs within a single location — it does not
+	// order locations relative to each other.
+	locIDs := make([]string, 0, len(byLocation))
+	for id := range byLocation {
+		locIDs = append(locIDs, id)
+	}
+	sort.Strings(locIDs)
+	for _, locID := range locIDs {
+		people := byLocation[locID]
 		sort.Slice(people, func(i, j int) bool { return people[i].ID < people[j].ID })
 		for i := 0; i < len(people); i++ {
 			for j := i + 1; j < len(people); j++ {

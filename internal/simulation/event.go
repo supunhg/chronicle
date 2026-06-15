@@ -120,6 +120,12 @@ func (e *EventEngine) Tick(w *core.World) error {
 			w.Events = append(w.Events, ev)
 		}
 	}
+	// Phase 26 Part B: enforce the live-event cap so the event
+	// log stays bounded across long runs. The trim runs AFTER
+	// the engine has finished appending for this tick, so this
+	// tick's events always survive (they are the newest).
+	// No-op when the log is under MaxLiveEvents.
+	TrimEvents(w)
 	return nil
 }
 
