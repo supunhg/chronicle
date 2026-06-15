@@ -32,11 +32,13 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/chronicle-dev/chronicle/internal/action"
 	"github.com/chronicle-dev/chronicle/internal/core"
 	"github.com/chronicle-dev/chronicle/internal/intent"
+	"github.com/chronicle-dev/chronicle/internal/lineage"
 	"github.com/chronicle-dev/chronicle/internal/narrator"
 	"github.com/chronicle-dev/chronicle/internal/persistence"
 )
@@ -88,16 +90,17 @@ type Options struct {
 
 // REPL is the in-game command loop. Construct via New.
 type REPL struct {
-	world    *core.World
-	parser   *intent.Parser
-	narrator *narrator.Narrator
-	action   *action.Engine
-	in       *bufio.Scanner
-	out      io.Writer
-	playerID string
-	autoTick bool
-	tickFn   func() error
-	running  bool
+	world          *core.World
+	parser         *intent.Parser
+	narrator       *narrator.Narrator
+	action         *action.Engine
+	in             *bufio.Scanner
+	out            io.Writer
+	playerID       string
+	autoTick       bool
+	tickFn         func() error
+	running        bool
+	bloodlineEnded bool
 }
 
 // New constructs a REPL. The world and parser are required.
@@ -158,6 +161,15 @@ func (r *REPL) Run(ctx context.Context) error {
 				return fmt.Errorf("repl: auto-tick: %w", err)
 			}
 		}
+		// Phase 30: detect player death before showing the prompt.
+		// If the player died during the previous tick (or auto-tick
+		// just ran), surface the death flow and pick a successor.
+		if err := r.checkPlayerDeath(); err != nil {
+			return err
+		}
+		if r.bloodlineEnded {
+			return nil
+		}
 		fmt.Fprint(r.out, "> ")
 		if !r.in.Scan() {
 			if err := r.in.Err(); err != nil {
@@ -191,6 +203,135 @@ func (r *REPL) isGameOver() bool {
 	return true
 }
 
+// checkPlayerDeath is the Phase 30 lineage flow. It runs at the
+// top of every Run iteration (after autoTick) and checks
+// whether the world.PlayerID person is still alive. If not, it
+// shows the death message + legacy record and prompts the
+// player to pick a successor. The five continuation modes
+// (heir, family, character, observer, end_bloodline) are
+// presented as choices; pressing Enter accepts the heir. The
+// function is a no-op when there is no player (PlayerID == "")
+// or the player is alive.
+//
+// On End Bloodline, r.bloodlineEnded is set so the Run loop
+// exits after the next iteration check.
+//
+// On Observer, w.PlayerID is cleared. The REPL stays running
+// (the chronicle continues); the player can type
+// "character <name>" to pick a successor at any time, or
+// "quit".
+func (r *REPL) checkPlayerDeath() error {
+	if r.world.PlayerID == "" {
+		return nil
+	}
+	player, ok := r.world.People[r.world.PlayerID]
+	if !ok || player.Alive {
+		return nil
+	}
+	// Player is dead. Score the top candidates and render.
+	topCandidates := lineage.ScoreSuccessors(r.world, r.world.PlayerID, 5)
+	if len(topCandidates) == 0 {
+		// No living candidates — chronicle ends here.
+		fmt.Fprintln(r.out, lineage.RenderDeathMessage(r.world, r.world.PlayerID, nil, nil))
+		if legacy := lineage.ComputeLegacy(r.world, r.world.PlayerID); legacy != nil {
+			fmt.Fprintln(r.out, lineage.RenderLegacyRecord(legacy))
+		}
+		r.bloodlineEnded = true
+		return nil
+	}
+	heir := topCandidates[0].Person
+	fmt.Fprintln(r.out, lineage.RenderDeathMessage(r.world, r.world.PlayerID, heir, topCandidates))
+	if legacy := lineage.ComputeLegacy(r.world, r.world.PlayerID); legacy != nil {
+		fmt.Fprintln(r.out, lineage.RenderLegacyRecord(legacy))
+	}
+	for {
+		fmt.Fprint(r.out, "\n> ")
+		if !r.in.Scan() {
+			if err := r.in.Err(); err != nil {
+				return fmt.Errorf("repl: read: %w", err)
+			}
+			return nil // EOF
+		}
+		choice := strings.TrimSpace(r.in.Text())
+		if choice == "" {
+			// Enter: accept the heir.
+			r.world.PlayerID = heir.ID
+			fmt.Fprintf(r.out, "\nYou are now %s.\n", heir.Name)
+			return nil
+		}
+		lower := strings.ToLower(choice)
+		switch lower {
+		case "heir", "h":
+			r.world.PlayerID = heir.ID
+			fmt.Fprintf(r.out, "\nYou are now %s.\n", heir.Name)
+			return nil
+		case "family", "f":
+			for _, c := range topCandidates {
+				if c.Breakdown.Family > 0 {
+					r.world.PlayerID = c.Person.ID
+					fmt.Fprintf(r.out, "\nYou are now %s (%s).\n", c.Person.Name, lineage.RelationLabel(r.world, player, c.Person))
+					return nil
+				}
+			}
+			fmt.Fprintln(r.out, "No living family members. Try 'character' or 'observer'.")
+		case "character", "c":
+			fmt.Fprintln(r.out, lineage.RenderSuccessorsList(topCandidates))
+			fmt.Fprint(r.out, "\nPick a number (1-5) or press Enter to go back: ")
+			if !r.in.Scan() {
+				return nil
+			}
+			pick := strings.TrimSpace(r.in.Text())
+			if pick == "" {
+				continue
+			}
+			idx, err := strconv.Atoi(pick)
+			if err != nil || idx < 1 || idx > len(topCandidates) {
+				fmt.Fprintln(r.out, "Invalid choice.")
+				continue
+			}
+			r.world.PlayerID = topCandidates[idx-1].Person.ID
+			fmt.Fprintf(r.out, "\nYou are now %s.\n", topCandidates[idx-1].Person.Name)
+			return nil
+		case "observer", "o":
+			r.world.PlayerID = ""
+			fmt.Fprintln(r.out, "\nYou are now an observer. The world continues without a player.")
+			fmt.Fprintln(r.out, "Type 'character <name>' to inhabit someone, or 'quit' to end.")
+			return nil
+		case "end_bloodline", "end", "e":
+			r.bloodlineEnded = true
+			fmt.Fprintln(r.out, "\nThe chronicle ends here.")
+			return nil
+		case "successors", "s":
+			fmt.Fprintln(r.out, lineage.RenderSuccessorsList(topCandidates))
+		default:
+			fmt.Fprintln(r.out, "Unknown choice. Press Enter for heir, or type: successors, family, character, observer, end_bloodline")
+		}
+	}
+}
+
+// execCharacter switches the player to a different living
+// person in the world. Useful in observer mode (after the
+// player has died) or as a debug command for testing. The
+// target is resolved by exact ID, then case-insensitive
+// full-name, then first-token match — mirroring findPerson.
+func (r *REPL) execCharacter(target string) {
+	if target == "" {
+		fmt.Fprintln(r.out, "Character whom? (Usage: character <name>)")
+		return
+	}
+	p := r.findPerson(target)
+	if p == nil {
+		fmt.Fprintf(r.out, "I don't see %q.\n", target)
+		return
+	}
+	if !p.Alive {
+		fmt.Fprintf(r.out, "%s is dead; you cannot inhabit them.\n", p.Name)
+		return
+	}
+	r.world.PlayerID = p.ID
+	fmt.Fprintf(r.out, "You are now %s (%s, %d).\n", p.Name, p.Gender, p.AgeAt(r.world.Tick))
+}
+
 // execute parses and runs one command line. First checks
 // for REPL meta-commands (quit, exit, help, people, auto-tick,
 // advance); everything else goes through the intent parser.
@@ -213,6 +354,14 @@ func (r *REPL) execute(ctx context.Context, line string) error {
 	}
 	if rest, ok := strings.CutPrefix(lower, "advance "); ok {
 		return r.execAdvance(strings.TrimSpace(rest))
+	}
+	if rest, ok := strings.CutPrefix(lower, "character "); ok {
+		r.execCharacter(strings.TrimSpace(rest))
+		return nil
+	}
+	if lower == "character" {
+		r.execCharacter("")
+		return nil
 	}
 	// Everything else → intent parser → dispatch.
 	in, err := r.parser.Parse(ctx, line)
@@ -334,6 +483,9 @@ Pacing
   advance week          Advance 7 sim days.
   advance month         Advance 30 sim days.
   auto-tick on|off      Toggle auto-advance (one tick before each prompt).
+
+Lineage
+  character <name>      Inhabit a different living person (observer mode).
 
 Meta
   help, ?               Show this help text.
