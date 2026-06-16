@@ -36,6 +36,7 @@ import (
 	"strings"
 
 	"github.com/chronicle-dev/chronicle/internal/action"
+	"github.com/chronicle-dev/chronicle/internal/conversation"
 	"github.com/chronicle-dev/chronicle/internal/core"
 	"github.com/chronicle-dev/chronicle/internal/intent"
 	"github.com/chronicle-dev/chronicle/internal/lineage"
@@ -86,6 +87,12 @@ type Options struct {
 	// read-only verbs all delegate to action.Engine.Resolve.
 	// Constructed by the CLI layer from the world + narrator.
 	Action *action.Engine
+	// ConvMgr is the conversation manager for immersive
+	// NPC dialogue. When set, "talk <npc>" enters a
+	// multi-turn conversation mode where all input goes
+	// to the LLM-driven dialogue system. Optional: when
+	// nil, talk falls back to the one-shot action engine.
+	ConvMgr *conversation.Manager
 }
 
 // REPL is the in-game command loop. Construct via New.
@@ -94,6 +101,7 @@ type REPL struct {
 	parser         *intent.Parser
 	narrator       *narrator.Narrator
 	action         *action.Engine
+	convMgr        *conversation.Manager
 	in             *bufio.Scanner
 	out            io.Writer
 	playerID       string
@@ -120,6 +128,7 @@ func New(w *core.World, parser *intent.Parser, opts Options) *REPL {
 		parser:   parser,
 		narrator: opts.Narrator,
 		action:   opts.Action,
+		convMgr:  opts.ConvMgr,
 		in:       scanner,
 		out:      out,
 		playerID: opts.PlayerID,
@@ -364,6 +373,30 @@ func (r *REPL) execCharacter(target string) {
 // for REPL meta-commands (quit, exit, help, people, auto-tick,
 // advance); everything else goes through the intent parser.
 func (r *REPL) execute(ctx context.Context, line string) error {
+	// If in conversation mode, route input to the conversation
+	// manager. Exit commands leave the conversation.
+	if r.convMgr != nil && r.convMgr.IsActive() {
+		lower := strings.ToLower(strings.TrimSpace(line))
+		switch lower {
+		case "quit", "exit":
+			// Allow quitting even during conversation
+			fmt.Fprintln(r.out, "Goodbye.")
+			r.running = false
+			return nil
+		case "bye", "goodbye", "leave", "stop", "farewell", "done":
+			msg := r.convMgr.End()
+			fmt.Fprintln(r.out, msg)
+			return nil
+		case "help", "?":
+			r.execHelp()
+			return nil
+		}
+		// Route to conversation manager
+		resp := r.convMgr.Continue(ctx, line)
+		fmt.Fprintln(r.out, resp)
+		return nil
+	}
+
 	lower := strings.ToLower(line)
 	switch lower {
 	case "quit", "exit":
@@ -413,6 +446,41 @@ func (r *REPL) dispatch(in intent.Intent) error {
 		r.execTime()
 	case intent.ActionTalk:
 		r.execTalk(in.Target)
+	case intent.ActionListen:
+		if r.action != nil {
+			res, _ := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionListen})
+			fmt.Fprintln(r.out, res.Text)
+		} else {
+			r.execLook("")
+		}
+	case intent.ActionWait:
+		hours := in.Args.Hours
+		if hours <= 0 {
+			hours = 1
+		}
+		if r.action != nil {
+			res, _ := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionWait, Args: intent.Args{Hours: hours}})
+			fmt.Fprintln(r.out, res.Text)
+		} else {
+			fmt.Fprintf(r.out, "You wait for %d hour(s). Time passes.\n", hours)
+		}
+	case intent.ActionWalk:
+		if in.Target != "" {
+			// Direct walk with direction: resolve immediately
+			if r.action != nil {
+				res, err := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionWalk, Target: in.Target})
+				if err != nil {
+					fmt.Fprintf(r.out, "error: %v\n", err)
+					return nil
+				}
+				fmt.Fprintln(r.out, res.Text)
+				return nil
+			}
+			fmt.Fprintf(r.out, "You walk %s.\n", in.Target)
+		} else {
+			// Interactive walk mode: ask for direction
+			r.execWalkInteractive()
+		}
 	case intent.ActionInspect:
 		r.execInspect(in.Target)
 	case intent.ActionTravel:
@@ -441,6 +509,27 @@ func (r *REPL) dispatch(in intent.Intent) error {
 			return nil
 		}
 		fmt.Fprintf(r.out, "%s is not yet implemented (Phase 17.4+).\n", in.Action)
+	case intent.ActionSearch:
+		if r.action != nil {
+			res, _ := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionSearch, Target: in.Target})
+			fmt.Fprintln(r.out, res.Text)
+		} else {
+			fmt.Fprintln(r.out, "You search the area, but find nothing remarkable.")
+		}
+	case intent.ActionPray:
+		if r.action != nil {
+			res, _ := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionPray})
+			fmt.Fprintln(r.out, res.Text)
+		} else {
+			fmt.Fprintln(r.out, "You bow your head in prayer. A quiet peace settles over you.")
+		}
+	case intent.ActionStatus:
+		if r.action != nil {
+			res, _ := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionStatus})
+			fmt.Fprintln(r.out, res.Text)
+		} else {
+			fmt.Fprintf(r.out, "Tick %d. You are alive.\n", r.world.Tick)
+		}
 	case intent.ActionBranch, intent.ActionSwitch:
 		if r.action != nil {
 			res, err := r.action.Resolve(ctxTODO(), intent.Intent{Action: in.Action, Target: in.Target})
@@ -451,7 +540,7 @@ func (r *REPL) dispatch(in intent.Intent) error {
 			fmt.Fprintln(r.out, res.Text)
 			return nil
 		}
-		fmt.Fprintf(r.out, "%s is not yet implemented (Phase 17.7+).\n", in.Action)
+		fmt.Fprintf(r.out, "%s is not yet implemented.\n", in.Action)
 	default:
 		return fmt.Errorf("unknown action %q", in.Action)
 	}
@@ -483,43 +572,57 @@ func (r *REPL) execHelp() {
 // exact content and future changes only need to be made in
 // one place.
 func helpText() string {
-	return `Chronicle REPL — commands
+	return `Chronicle — The Free Marches
 
-Reading
-  look                  Show your current location and the people there.
-  look <name|place>     Show a specific person or location.
-  inspect <name>        Show a person's details (same as "look <name>").
-  people                List all alive people in the world.
-  time                  Show the current sim tick and date.
+  You are living in a frontier world. Explore, talk, survive.
 
-Acting
-  talk <name>           Talk to a person (creates a memory + trust delta).
-  travel <place>        Travel to a location (advances 1 tick).
-  sleep [hours]         Sleep (default 8 hours; advances time).
-  buy <item> [qty]      Buy from a merchant at your location.
-  sell <item> [qty]     Sell to a merchant at your location.
-  inventory             Show your inventory and coin.
+--- Exploring ---
+  look                  Take in your surroundings.
+  look <name|place>     Examine a person or place closely.
+  inspect <name>        Study someone or something in detail.
+  walk                  Wander (pick a destination interactively).
+  walk <place>          Walk toward a destination.
+  travel <place>        Journey to a distant location (costs time).
+  search                Search your surroundings for anything useful.
+  listen                Pause and listen to the world around you.
 
-Saving & branching
-  save [path.db]        Snapshot the world to a SQLite file.
-  branch <name>         Save a named branch of the current world.
-  switch <name>         Restore a named branch into the current world.
-  info                  Hint: use "chronicle info <path.db>" from the shell.
+--- Living ---
+  talk <name>           Speak with someone (enters conversation).
+  sleep [hours]         Rest and let time pass.
+  wait                  Wait and observe the world.
+  pray                  Find a quiet moment of reflection.
+  eat / drink           (coming soon)
+  work                  (coming soon)
 
-Pacing
-  advance day           Advance 1 sim day.
-  advance week          Advance 7 sim days.
-  advance month         Advance 30 sim days.
-  auto-tick on|off      Toggle auto-advance (one tick before each prompt).
+--- Trade ---
+  buy <item> [qty]      Purchase from a merchant.
+  sell <item> [qty]     Sell to a merchant.
+  inventory             Check what you're carrying.
 
-Lineage
-  character <name>      Inhabit a different living person (observer mode).
+--- Knowledge ---
+  status                Your full character journal.
+  time                  What season and hour is it?
+  people                Who lives in this world?
 
-Meta
-  help, ?               Show this help text.
-  quit, exit            Leave the REPL.
+--- Saving ---
+  save [path.db]        Save your world to disk.
+  branch <name>         Create a named branch.
+  switch <name>         Restore a named branch.
 
-Tip: type "people" to see who's alive, then "talk <name>" to start a conversation.
+--- Pacing ---
+  advance day           Let a day pass.
+  advance week          Let a week pass.
+  advance month         Let a month pass.
+  auto-tick on|off      Toggle automatic time flow.
+
+--- Meta ---
+  character <name>      Inhabit a different person (observer mode).
+  help, ?               This text.
+  quit, exit            Leave the world.
+
+Tip: just type naturally. "walk", "talk to elena", "search the inn",
+     "pray at the temple", "look around". The world will respond.
+     During a conversation, speak freely. Say "bye" to end it.
 `
 }
 
@@ -671,12 +774,32 @@ func (r *REPL) printPerson(p *core.Person) {
 	}
 }
 
-// execTalk renders narration for talking to a person.
-// Phase 17.5: delegates to action.Engine.Resolve which
-// creates a memory record, applies a trust delta, and
-// returns rendered text. When no Action engine is set,
-// prints a Phase 17.3 stub for backwards compatibility.
+// execTalk starts a conversation with an NPC. When the
+// conversation manager is available, it enters multi-turn
+// dialogue mode. Otherwise falls back to the action engine
+// for a one-shot talk, or prints a stub.
 func (r *REPL) execTalk(target string) {
+	if target == "" {
+		fmt.Fprintln(r.out, "Talk to whom? (Usage: talk <name>)")
+		return
+	}
+	p := r.findPerson(target)
+	if p == nil {
+		fmt.Fprintf(r.out, "I don't see %q here.\n", target)
+		return
+	}
+	if !p.Alive {
+		fmt.Fprintf(r.out, "%s is dead; you cannot talk to them.\n", p.Name)
+		return
+	}
+	// Conversation manager: enter multi-turn dialogue
+	if r.convMgr != nil {
+		greeting := r.convMgr.Start(ctxTODO(), p)
+		fmt.Fprintf(r.out, "\n%s\n\n", greeting)
+		fmt.Fprintf(r.out, "[You are now talking to %s. Type 'bye' to end the conversation.]\n", p.Name)
+		return
+	}
+	// Fallback: action engine one-shot
 	if r.action != nil {
 		res, err := r.action.Resolve(ctxTODO(), intent.Intent{Action: intent.ActionTalk, Target: target})
 		if err != nil {
@@ -690,12 +813,111 @@ func (r *REPL) execTalk(target string) {
 		fmt.Fprintln(r.out, res.Text)
 		return
 	}
-	p := r.findPerson(target)
-	if p == nil {
-		fmt.Fprintf(r.out, "I don't see %q here.\n", target)
+	fmt.Fprintf(r.out, "You talk to %s.\n", p.Name)
+}
+
+// execWalkInteractive enters the interactive walk sub-prompt. It asks
+// the player where they want to walk and how far, then describes the
+// journey. The player can type a destination name or pick a number
+// from the list.
+func (r *REPL) execWalkInteractive() {
+	// Step 1: Ask WHERE
+	prompt := "Where do you want to walk?"
+	var destinations []string
+	if r.action != nil {
+		rawDests := r.action.ConnectedLocations()
+		buildings := make(map[string]bool)
+		for _, b := range r.action.CurrentBuildings() {
+			buildings[strings.ToLower(b)] = true
+		}
+		// Format destinations: prefix buildings with "→ " for display
+		for _, d := range rawDests {
+			if buildings[strings.ToLower(d)] {
+				destinations = append(destinations, "→ "+d)
+			} else {
+				destinations = append(destinations, d)
+			}
+		}
+		player := r.action.Player()
+		if player != nil {
+			if len(destinations) == 0 {
+				fmt.Fprintln(r.out, "There is nowhere else to walk. You are at the only destination.")
+				return
+			}
+			if loc, ok := r.world.Locations[player.LocationID]; ok {
+				prompt = "From " + loc.Name + ", where would you like to walk?"
+				prompt += "\n\nNearby:\n"
+				for i, dest := range destinations {
+					prompt += fmt.Sprintf("  %d. %s\n", i+1, dest)
+				}
+				prompt += "\nType a destination name or number (1-" + fmt.Sprintf("%d", len(destinations)) + "):"
+			}
+		}
+	}
+	fmt.Fprintln(r.out, prompt)
+	fmt.Fprint(r.out, "> ")
+	if !r.in.Scan() {
+		return // EOF
+	}
+	choice := strings.TrimSpace(r.in.Text())
+	if choice == "" {
+		fmt.Fprintln(r.out, "You decide to stay put.")
 		return
 	}
-	fmt.Fprintf(r.out, "You talk to %s.\n", p.Name)
+	// Resolve numeric choice with bounds check
+	if idx, err := strconv.Atoi(choice); err == nil {
+		if idx < 1 || idx > len(destinations) {
+			fmt.Fprintf(r.out, "Invalid choice %d (have %d destinations).\n", idx, len(destinations))
+			return
+		}
+		choice = destinations[idx-1]
+	}
+	// Strip display prefix ("→ Inn" → "Inn") for the resolver
+	choice = strings.TrimPrefix(choice, "→ ")
+
+	// Step 2: Ask HOW FAR
+	fmt.Fprintln(r.out, "\nHow far do you want to walk?")
+	fmt.Fprintln(r.out, "  1. A short stroll (no time passes)")
+	fmt.Fprintln(r.out, "  2. A good walk (1 day)")
+	fmt.Fprintln(r.out, "  3. A long trek (2 days)")
+	fmt.Fprint(r.out, "> ")
+	distance := "a good walk"
+	if r.in.Scan() {
+		distInput := strings.TrimSpace(r.in.Text())
+		switch distInput {
+		case "1":
+			distance = "a short stroll"
+		case "2":
+			distance = "a good walk"
+		case "3":
+			distance = "a long trek"
+		default:
+			if distInput != "" {
+				distance = distInput
+			}
+		}
+	}
+
+	// Step 3: Resolve the walk with distance modifier
+	fullTarget := choice
+	if r.action != nil {
+		res, err := r.action.Resolve(ctxTODO(), intent.Intent{
+			Action: intent.ActionWalk,
+			Target: fullTarget,
+			Args:   intent.Args{Hours: distanceTicks(distance)},
+		})
+		if err != nil {
+			fmt.Fprintf(r.out, "error: %v\n", err)
+			return
+		}
+		if !res.OK {
+			fmt.Fprintln(r.out, res.Text)
+			return
+		}
+		fmt.Fprintln(r.out, res.Text)
+	} else {
+		fmt.Fprintf(r.out, "\nYou take %s toward %s.\n", distance, fullTarget)
+	}
 }
 
 // execTravel renders narration for traveling to a location.
@@ -894,6 +1116,29 @@ func (r *REPL) findLocation(target string) *core.Location {
 		}
 	}
 	return nil
+}
+
+// capitalizeFirst capitalizes the first letter of a string.
+// Replaces the deprecated strings.Title.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// distanceTicks maps the distance choice to tick advancement:
+// "short stroll" = 0 (sub-tick, no time passes),
+// "good walk" = 1 day, "long trek" = 2 days.
+func distanceTicks(distance string) int {
+	switch distance {
+	case "a short stroll":
+		return 0
+	case "a long trek":
+		return 2
+	default: // "a good walk" or custom
+		return 1
+	}
 }
 
 // ctxTODO returns a fresh background context. Used for

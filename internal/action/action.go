@@ -162,6 +162,22 @@ func (e *Engine) Resolve(ctx context.Context, in intent.Intent) (Result, error) 
 		return e.resolveBranch(in.Target), nil
 	case intent.ActionSwitch:
 		return e.resolveSwitch(in.Target), nil
+	case intent.ActionListen:
+		return e.resolveListen(), nil
+	case intent.ActionWait:
+		return e.resolveWait(in.Args.Hours), nil
+	case intent.ActionWalk:
+		distMod := in.Args.Hours // repurposed: 0=stroll, 1=walk, 2=trek
+		if distMod <= 0 {
+			distMod = 1
+		}
+		return e.resolveWalk(in.Target, distMod), nil
+	case intent.ActionSearch:
+		return e.resolveSearch(in.Target), nil
+	case intent.ActionPray:
+		return e.resolvePray(), nil
+	case intent.ActionStatus:
+		return e.resolveStatus(), nil
 	default:
 		return Result{}, fmt.Errorf("action: unknown action %q", in.Action)
 	}
@@ -169,14 +185,23 @@ func (e *Engine) Resolve(ctx context.Context, in intent.Intent) (Result, error) 
 
 // resolveLook handles "look" — read-only, no world changes.
 // With a target, it shows a person or location. Without a
-// target, it shows the first location (sorted by ID) and
-// its people. Narration is delegated to the Narrator when
-// present, otherwise the engine uses its own template.
+// target, it generates an immersive scene description via
+// the narrator's DescribeScene (LLM-first, template fallback).
 func (e *Engine) resolveLook(target string) Result {
 	if target == "" {
+		// Immersive scene description
+		if e.narrator != nil {
+			text := e.narrator.DescribeScene(context.Background(), e.world)
+			return Result{OK: true, Text: text}
+		}
 		return e.lookLocation("")
 	}
 	if p := e.findPerson(target); p != nil {
+		// Immersive person description
+		if e.narrator != nil {
+			text := e.narrator.DescribePerson(context.Background(), e.world, p)
+			return Result{OK: true, Text: text}
+		}
 		return e.lookPerson(p)
 	}
 	if l := e.findLocation(target); l != nil {
@@ -186,9 +211,7 @@ func (e *Engine) resolveLook(target string) Result {
 }
 
 // resolveInspect handles "inspect <name>" — read-only, shows
-// a person's full details. Currently identical to lookPerson;
-// Phase 17.6+ may add an inspect-specific template (e.g.,
-// showing traits, needs, goals).
+// a person's full details with immersive description.
 func (e *Engine) resolveInspect(target string) Result {
 	if strings.TrimSpace(target) == "" {
 		return Result{OK: false, Text: "Inspect whom? (Usage: inspect <name>)"}
@@ -196,6 +219,10 @@ func (e *Engine) resolveInspect(target string) Result {
 	p := e.findPerson(target)
 	if p == nil {
 		return Result{OK: false, Text: fmt.Sprintf("I don't see %q here.", target)}
+	}
+	if e.narrator != nil {
+		text := e.narrator.DescribePerson(context.Background(), e.world, p)
+		return Result{OK: true, Text: text}
 	}
 	return e.lookPerson(p)
 }
@@ -284,13 +311,8 @@ func (e *Engine) resolveTalk(ctx context.Context, target string) Result {
 
 // resolveTravel handles "travel <location>" — moves the
 // player to the destination and advances time by 1 tick
-// (a day on the road). Narration is delegated to the
-// Narrator.
-//
-// The target must be a known location. The player must
-// exist (Phase 17.5 adds the PlayerID field to Options;
-// if no player is set, travel is a no-op with a clear
-// message — world-level travel is a Phase 18+ concern).
+// (a day on the road). Uses immersive journey narration
+// when the narrator is available.
 func (e *Engine) resolveTravel(ctx context.Context, target string) Result {
 	l := e.findLocation(target)
 	if l == nil {
@@ -304,13 +326,13 @@ func (e *Engine) resolveTravel(ctx context.Context, target string) Result {
 		return Result{OK: false, Text: fmt.Sprintf("You are already at %s.", l.Name)}
 	}
 
+	oldLocID := player.LocationID
+
 	// Move the player and advance time by 1 tick.
-	oldLoc := player.LocationID
 	player.LocationID = l.ID
 	e.advanceTick(1)
 
-	// Record the travel as a memory. Low importance, no
-	// trust delta (travel doesn't change relationships).
+	// Record the travel as a memory.
 	mem := core.Memory{
 		ID:             fmt.Sprintf("mem-travel-%d-%s", e.world.Tick, player.ID),
 		OwnerID:        player.ID,
@@ -319,18 +341,13 @@ func (e *Engine) resolveTravel(ctx context.Context, target string) Result {
 		Importance:     0.1,
 		Recency:        1.0,
 		EmotionalScore: 0.0,
-		Description:    fmt.Sprintf("traveled from %s to %s", locationNameOrID(e.world, oldLoc), l.Name),
+		Description:    fmt.Sprintf("traveled from %s to %s", locationNameOrID(e.world, oldLocID), l.Name),
 		Tags:           []string{"travel"},
 	}
 	e.world.Memories = append(e.world.Memories, mem)
 
 	// Narration: delegate to the Narrator if present.
 	text := e.renderTravel(ctx, l)
-	// Phase 31: append an "elapsed time" annotation so the
-	// player sees the sim-time cost of traveling. Mirrors
-	// the "M day(s) elapsed" line on resolveSleep; both
-	// duration-bearing actions are now consistent in style
-	// (fmt.Sprintf + trailing period).
 	return Result{OK: true, Text: text + fmt.Sprintf(" (1 day elapsed, now tick %d).", e.world.Tick), TicksAdvanced: 1}
 }
 
@@ -364,6 +381,398 @@ func (e *Engine) resolveSleep(hours int) Result {
 		Text:          fmt.Sprintf("You sleep for %d hours (%d %s elapsed, now tick %d).", hours, ticks, dayWord, e.world.Tick),
 		TicksAdvanced: ticks,
 	}
+}
+
+// resolveWait handles "wait" — the player pauses briefly, observing
+// the world around them. Does not advance simulation ticks (the
+// simulation operates on 1-day ticks; waiting an hour is sub-tick).
+// The narrator provides an atmospheric description of the scene.
+func (e *Engine) resolveWait(hours int) Result {
+	if hours <= 0 {
+		hours = 1
+	}
+	if hours > 24 {
+		hours = 24
+	}
+	dayWord := "hours"
+	if hours == 1 {
+		dayWord = "hour"
+	}
+	if e.narrator != nil {
+		text := e.narrator.DescribeScene(context.Background(), e.world)
+		return Result{OK: true, Text: fmt.Sprintf("You wait for %d %s...\n\n%s", hours, dayWord, text)}
+	}
+	return Result{OK: true, Text: fmt.Sprintf("You wait for %d %s. Time passes.", hours, dayWord)}
+}
+
+// resolveWalk handles "walk <destination>" — resolves the destination
+// and describes the journey. Bare "walk" (empty target) is handled by
+// the REPL's execWalkInteractive before reaching the engine.
+// distMod modifies the tick advancement: "short stroll" = 0, "good walk" = 1, "long trek" = 2.
+func (e *Engine) resolveWalk(target string, distMod int) Result {
+	if strings.TrimSpace(target) == "" {
+		return Result{OK: false, Text: "Walk where?"}
+	}
+	player := e.player()
+	if player == nil {
+		return Result{OK: false, Text: "You need a player character to walk. (Set Options.PlayerID.)"}
+	}
+	// Try to find destination by location name
+	destination := e.findLocation(target)
+	if destination == nil {
+		// Check if the target is a building within the current settlement
+		currentLoc, lok := e.world.Locations[player.LocationID]
+		if lok {
+			if building := e.findBuilding(currentLoc, target); building != "" {
+				text := e.describeWalkingToBuilding(building, currentLoc)
+				return Result{OK: true, Text: text, TicksAdvanced: 0}
+			}
+		}
+		// No location or building found — describe walking in that direction
+		text := e.describeWalkingNowhere(target)
+		return Result{OK: true, Text: text, TicksAdvanced: 0}
+	}
+	if destination.ID == player.LocationID {
+		return Result{OK: false, Text: fmt.Sprintf("You are already at %s.", destination.Name)}
+	}
+	// Found a destination — travel there, adjusting ticks for distance
+	oldLocID := player.LocationID
+	player.LocationID = destination.ID
+	e.advanceTick(int64(distMod))
+
+	// Record the walk as a memory
+	mem := core.Memory{
+		ID:             fmt.Sprintf("mem-walk-%d-%s", e.world.Tick, player.ID),
+		OwnerID:        player.ID,
+		EventID:        fmt.Sprintf("walk-%d-%s", e.world.Tick, destination.ID),
+		Tick:           e.world.Tick,
+		Importance:     0.1,
+		Recency:        1.0,
+		EmotionalScore: 0.0,
+		Description:    fmt.Sprintf("walked from %s to %s", locationNameOrID(e.world, oldLocID), destination.Name),
+		Tags:           []string{"walk"},
+	}
+	e.world.Memories = append(e.world.Memories, mem)
+
+	// Narration: use walk-specific narrator when available
+	var text string
+	if e.narrator != nil {
+		oldLoc, lok := e.world.Locations[oldLocID]
+		if lok {
+			text = e.narrator.DescribeWalk(context.Background(), e.world, oldLoc, destination, distMod)
+		} else {
+			text = e.renderTravel(context.Background(), destination)
+		}
+	} else {
+		text = e.renderTravel(context.Background(), destination)
+	}
+	if distMod > 0 {
+		days := "day"
+		if distMod > 1 {
+			days = "days"
+		}
+		text += fmt.Sprintf("\n\n(%d %s elapsed, now tick %d).", distMod, days, e.world.Tick)
+	}
+	return Result{OK: true, Text: text, TicksAdvanced: int64(distMod)}
+}
+
+// describeWalkingNowhere generates an atmospheric description when the
+// player walks in a direction with no specific destination.
+func (e *Engine) describeWalkingNowhere(direction string) string {
+	player := e.player()
+	if player == nil {
+		return fmt.Sprintf("You walk %s, but there's nothing notable in that direction.", direction)
+	}
+	loc, ok := e.world.Locations[player.LocationID]
+	if !ok {
+		return fmt.Sprintf("You walk %s. The path is unfamiliar.", direction)
+	}
+	// Try narrator for atmospheric nowhere-walk
+	if e.narrator != nil {
+		season := narrator.SeasonFromTick(e.world.Tick)
+		timeDesc := narrator.TimeOfDayFromTick(e.world.Tick)
+		return fmt.Sprintf("You wander %s from %s in the %s %s air. The countryside stretches before you — meadows, scattered trees, and the distant hum of frontier life. After a pleasant stroll, you find yourself back where you started, refreshed by the outing.",
+			direction, loc.Name, strings.ToLower(timeDesc), strings.ToLower(season))
+	}
+	return fmt.Sprintf("You walk %s from %s. The countryside stretches before you. After a pleasant stroll, you find yourself back where you started.",
+		direction, loc.Name)
+}
+
+// ConnectedLocations returns a sorted list of destination names the
+// player can walk to. Includes buildings within the current settlement
+// and other settlements. Returns raw canonical names — the REPL is
+// responsible for display formatting.
+func (e *Engine) ConnectedLocations() []string {
+	p := e.player()
+	if p == nil {
+		return nil
+	}
+	var names []string
+	// Buildings within the current settlement
+	if loc, ok := e.world.Locations[p.LocationID]; ok {
+		for _, b := range loc.Buildings {
+			names = append(names, b)
+		}
+	}
+	// Other settlements
+	for _, l := range e.world.Locations {
+		if l.ID != p.LocationID {
+			names = append(names, l.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// CurrentBuildings returns the building names at the player's current
+// location. Used by the REPL to distinguish buildings from settlements
+// in the walk prompt.
+func (e *Engine) CurrentBuildings() []string {
+	p := e.player()
+	if p == nil {
+		return nil
+	}
+	if loc, ok := e.world.Locations[p.LocationID]; ok {
+		return loc.Buildings
+	}
+	return nil
+}
+
+// findBuilding matches a building name within a location. Returns
+// the canonical building name if found, empty string otherwise.
+// Case-insensitive exact match first, then word-boundary match
+// ("inn" matches "The Prancing Inn" but not "Inner Sanctum").
+func (e *Engine) findBuilding(loc *core.Location, target string) string {
+	lower := strings.ToLower(strings.TrimSpace(target))
+	if lower == "" {
+		return ""
+	}
+	// Exact match first
+	for _, b := range loc.Buildings {
+		if strings.ToLower(b) == lower {
+			return b
+		}
+	}
+	// Word-boundary match: target appears as a whole word in the building name
+	for _, b := range loc.Buildings {
+		words := strings.Fields(strings.ToLower(b))
+		for _, w := range words {
+			if w == lower {
+				return b
+			}
+		}
+	}
+	return ""
+}
+
+// describeWalkingToBuilding produces an atmospheric description of
+// walking to a building within the current settlement. Delegates to
+// the narrator when available.
+func (e *Engine) describeWalkingToBuilding(building string, loc *core.Location) string {
+	if e.narrator != nil {
+		return e.narrator.DescribeBuilding(context.Background(), e.world, building, loc)
+	}
+	return fmt.Sprintf("You walk to the %s in %s.", building, loc.Name)
+}
+
+// resolveSearch handles "search" — the player searches their
+// surroundings for something of interest. Finds items, clues, or
+// describes what's hidden in the current location or building.
+func (e *Engine) resolveSearch(target string) Result {
+	player := e.player()
+	if player == nil {
+		return Result{OK: true, Text: "You look around carefully, but there's nothing remarkable to find."}
+	}
+	loc, ok := e.world.Locations[player.LocationID]
+	if !ok {
+		return Result{OK: true, Text: "You search, but find nothing of interest."}
+	}
+	// Atmospheric search results — what you find depends on where you are
+	season := narrator.SeasonFromTick(e.world.Tick)
+	timeDesc := narrator.TimeOfDayFromTick(e.world.Tick)
+
+	if target != "" {
+		// Searching for something specific
+		if e.narrator != nil {
+			text := e.narrator.DescribeScene(context.Background(), e.world)
+			return Result{OK: true, Text: fmt.Sprintf("You search for %s in %s...\n\n%s", target, loc.Name, text)}
+		}
+		return Result{OK: true, Text: fmt.Sprintf("You search for %s in %s, but find nothing specific. The %s air is quiet around you.", target, loc.Name, strings.ToLower(season))}
+	}
+
+	// General searching — describe what catches your eye
+	searchResults := []string{
+		fmt.Sprintf("You search %s carefully in the %s light. A worn leather pouch catches your eye in the gutter — but it's empty. Still, someone was here recently.", loc.Name, strings.ToLower(timeDesc)),
+		fmt.Sprintf("You rummage through the area. Under a loose stone, you find a faded scrap of paper with barely legible writing. The ink has run in the %s rain.", strings.ToLower(season)),
+		fmt.Sprintf("You search the surroundings. The %s air carries the scent of woodsmoke and old timber. You notice scratch marks on a doorframe — claw marks, perhaps.", strings.ToLower(season)),
+		fmt.Sprintf("You scour %s from end to end. Nothing of value presents itself, but you notice details you missed before — a hidden alcove, a cracked window, the way shadows pool in corners.", loc.Name),
+		fmt.Sprintf("You search the area in the %s. Near the base of a wall, you find a small cache of candle stubs and a bent copper coin. Someone else was hiding things here.", strings.ToLower(timeDesc)),
+	}
+	hash := int(e.world.Tick) + len(player.ID)*13
+	return Result{OK: true, Text: searchResults[hash%len(searchResults)]}
+}
+
+// resolvePray handles "pray" — the player takes a moment to pray
+// or meditate. Restores a sense of calm and can provide narrative
+// reflection on recent events. No world mutation.
+func (e *Engine) resolvePray() Result {
+	player := e.player()
+	if player == nil {
+		return Result{OK: true, Text: "You close your eyes and find a moment of stillness."}
+	}
+	loc, ok := e.world.Locations[player.LocationID]
+	if !ok {
+		return Result{OK: true, Text: "You bow your head in prayer. A quiet peace settles over you."}
+	}
+	// Check if there's a temple or shrine nearby
+	hasTemple := false
+	for _, b := range loc.Buildings {
+		lower := strings.ToLower(b)
+		if strings.Contains(lower, "temple") || strings.Contains(lower, "shrine") || strings.Contains(lower, "church") || strings.Contains(lower, "chapel") || strings.Contains(lower, "monastery") {
+			hasTemple = true
+			break
+		}
+	}
+	if hasTemple {
+		return Result{OK: true, Text: fmt.Sprintf("You find the %s and kneel before the altar. Candles flicker in the dim light, and the scent of incense fills the air. In the quiet, you reflect on your journey so far. A deep peace settles in your heart.", loc.Name)}
+	}
+	if e.narrator != nil {
+		season := narrator.SeasonFromTick(e.world.Tick)
+		return Result{OK: true, Text: fmt.Sprintf("You step away from the bustle of %s and find a quiet spot. Bowing your head, you offer a prayer to whatever gods watch over the Free Marches. The %s air is still, and for a moment, the world feels at peace.", loc.Name, strings.ToLower(season))}
+	}
+	return Result{OK: true, Text: fmt.Sprintf("You bow your head in prayer in %s. The world is quiet for a moment, and you feel a sense of calm.", loc.Name)}
+}
+
+// resolveStatus handles "status" — an immersive character journal.
+// Describes the player's situation as a narrative, not a data dump.
+func (e *Engine) resolveStatus() Result {
+	player := e.player()
+	if player == nil {
+		return Result{OK: true, Text: "You are an observer, unbound to any mortal form."}
+	}
+	var b strings.Builder
+
+	loc := "an unknown place"
+	if l, ok := e.world.Locations[player.LocationID]; ok {
+		loc = l.Name
+	}
+	season := narrator.SeasonFromTick(e.world.Tick)
+	timeDesc := narrator.TimeOfDayFromTick(e.world.Tick)
+	gender := "Male"
+	if player.Gender == "F" {
+		gender = "Female"
+	}
+
+	// Narrative opening
+	fmt.Fprintf(&b, "\nYou pause and take stock of your situation.\n\n")
+	fmt.Fprintf(&b, "You are %s, a %s of %s class, %d years of age.", player.Name, strings.ToLower(gender), player.Class, player.AgeAt(e.world.Tick))
+	if player.Occupation != "" {
+		fmt.Fprintf(&b, " By trade, you are a %s.", player.Occupation)
+	}
+	fmt.Fprintf(&b, " You find yourself in %s on this %s %s.\n\n", loc, strings.ToLower(timeDesc), strings.ToLower(season))
+
+	// Wealth — narrative
+	if e.world.Coin > 0 {
+		fmt.Fprintf(&b, "You carry %d coin", e.world.Coin)
+	} else {
+		b.WriteString("Your purse is empty")
+	}
+	if len(e.world.Inventory) > 0 {
+		b.WriteString(", along with ")
+		items := make([]string, 0, len(e.world.Inventory))
+		for name, it := range e.world.Inventory {
+			if it.Count > 1 {
+				items = append(items, fmt.Sprintf("%d %s", it.Count, name))
+			} else {
+				items = append(items, fmt.Sprintf("a %s", name))
+			}
+		}
+		b.WriteString(strings.Join(items, ", "))
+	}
+	b.WriteString(".\n\n")
+
+	// Family — narrative
+	hasFamily := false
+	if player.SpouseID != "" {
+		if spouse, ok := e.world.People[player.SpouseID]; ok {
+			fmt.Fprintf(&b, "You are married to %s.", spouse.Name)
+			hasFamily = true
+		}
+	}
+	if player.FatherID != "" {
+		if father, ok := e.world.People[player.FatherID]; ok {
+			if !father.Alive {
+				fmt.Fprintf(&b, " Your father, %s, has passed.", father.Name)
+			} else {
+				fmt.Fprintf(&b, " Your father %s is alive.", father.Name)
+			}
+			hasFamily = true
+		}
+	}
+	if player.MotherID != "" {
+		if mother, ok := e.world.People[player.MotherID]; ok {
+			if !mother.Alive {
+				fmt.Fprintf(&b, " Your mother, %s, has passed.", mother.Name)
+			} else {
+				fmt.Fprintf(&b, " Your mother %s is alive.", mother.Name)
+			}
+			hasFamily = true
+		}
+	}
+	if hasFamily {
+		b.WriteString("\n\n")
+	}
+
+	// Recent memories — narrative
+	var recentMemories []core.Memory
+	for _, mem := range e.world.Memories {
+		if mem.OwnerID == player.ID && mem.Importance > 0.2 {
+			recentMemories = append(recentMemories, mem)
+		}
+	}
+	if len(recentMemories) > 0 {
+		b.WriteString("You think back on recent events:\n")
+		limit := 5
+		if len(recentMemories) < limit {
+			limit = len(recentMemories)
+		}
+		for _, mem := range recentMemories[len(recentMemories)-limit:] {
+			fmt.Fprintf(&b, "  - %s\n", mem.Description)
+		}
+	}
+
+	b.WriteString("\n")
+	return Result{OK: true, Text: b.String()}
+}
+
+// resolveListen handles "listen" — the player pauses to listen to
+// their surroundings. Surfaces ambient sounds, overheard conversations,
+// and environmental details. No world mutation, no time advancement.
+func (e *Engine) resolveListen() Result {
+	if e.narrator != nil {
+		text := e.narrator.DescribeScene(context.Background(), e.world)
+		prefix := "You pause and listen carefully...\n\n"
+		return Result{OK: true, Text: prefix + text}
+	}
+	player := e.player()
+	if player == nil {
+		return Result{OK: true, Text: "You listen. The world hums around you."}
+	}
+	loc, ok := e.world.Locations[player.LocationID]
+	if !ok {
+		return Result{OK: true, Text: "You listen, but hear nothing remarkable."}
+	}
+	people := e.world.LivingPeopleAt(player.LocationID)
+	count := 0
+	for _, p := range people {
+		if p.ID != player.ID {
+			count++
+		}
+	}
+	if count > 0 {
+		return Result{OK: true, Text: fmt.Sprintf("You listen carefully. The sounds of %d people fill %s — voices, footsteps, the clatter of daily life.", count, loc.Name)}
+	}
+	return Result{OK: true, Text: fmt.Sprintf("You listen. %s is quiet. A gentle breeze and distant birdsong are all you hear.", loc.Name)}
 }
 
 // resolveSave handles "save [path]" — writes the current
@@ -673,6 +1082,13 @@ func (e *Engine) renderTravel(ctx context.Context, l *core.Location) string {
 		})
 	}
 	return fmt.Sprintf("You travel to %s.", l.Name)
+}
+
+// Player returns the PlayerID person, or nil if the world
+// has no player set. Exported so the REPL can access the
+// current player for interactive prompts.
+func (e *Engine) Player() *core.Person {
+	return e.player()
 }
 
 // player returns the PlayerID person, or nil if the world

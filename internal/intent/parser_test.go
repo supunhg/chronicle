@@ -391,9 +391,9 @@ func TestParser_LLMFallback_Success(t *testing.T) {
 	}
 	p := New(mock, newTestWorld())
 
-	// "converse" is not in the alias table, so the rule
+	// "whisper" is not in the alias table, so the rule
 	// parser falls through to the LLM.
-	got, err := p.Parse(context.Background(), "converse with the blacksmith's daughter")
+	got, err := p.Parse(context.Background(), "whisper to the blacksmith's daughter")
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}

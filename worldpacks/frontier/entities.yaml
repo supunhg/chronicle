@@ -24,13 +24,17 @@ locations:
     population_cap: 80
     buildings:
       - "Town Hall"
-      - "Inn"
-      - "Market"
-      - "Smithy"
-      - "Bakery"
-      - "Temple"
-      - "Stables"
-      - "Guild Hall"
+      - "The Drunken Fox Inn"
+      - "Market Square"
+      - "Ironheart Smithy"
+      - "Hearthstone Bakery"
+      - "Temple of the Dawn"
+      - "Blackwater Stables"
+      - "Merchant Guild Hall"
+      - "The Black Duck Tavern"
+      - "Town Gates"
+      - "River Docks"
+      - "Graveyard"
 
   - id: "millbrook"
     name: "Millbrook"
@@ -38,6 +42,10 @@ locations:
     region: "The Free Marches"
     population: 13
     population_cap: 20
+    buildings:
+      - "Old Mill"
+      - "Millbrook Chapel"
+      - "Village Well"
 
   - id: "ashford"
     name: "Ashford"
@@ -45,6 +53,10 @@ locations:
     region: "The Free Marches"
     population: 12
     population_cap: 20
+    buildings:
+      - "Ashford Farmstead"
+      - "The Crossroads Inn"
+      - "Village Shrine"
 
   - id: "thornkeep"
     name: "Thornkeep"
@@ -52,6 +64,10 @@ locations:
     region: "The Free Marches"
     population: 13
     population_cap: 20
+    buildings:
+      - "Thornkeep Stockade"
+      - "Hunter's Lodge"
+      - "Smoking House"
 
   - id: "elderfield"
     name: "Elderfield"
@@ -59,6 +75,10 @@ locations:
     region: "The Free Marches"
     population: 12
     population_cap: 20
+    buildings:
+      - "Elderfield Granary"
+      - "Herb Garden"
+      - "Shepherd's Hut"
 
   - id: "dawn_monastery"
     name: "Dawn Monastery"
@@ -66,6 +86,11 @@ locations:
     region: "The Free Marches"
     population: 5
     population_cap: 10
+    buildings:
+      - "Monastery Chapel"
+      - "Scriptorium"
+      - "Monastery Gardens"
+      - "Bell Tower"
 
   - id: "northwatch_fort"
     name: "Northwatch Fort"
@@ -73,6 +98,11 @@ locations:
     region: "The Free Marches"
     population: 5
     population_cap: 15
+    buildings:
+      - "Commander's Hall"
+      - "Armory"
+      - "Watchtower"
+      - "Fort Barracks"
 
 trade_routes:
   - id: "blackwater_millbrook"
@@ -93,6 +123,12 @@ trade_routes:
   - id: "northwatch_thornkeep"
     from: "northwatch_fort"
     to: "thornkeep"
+  - id: "millbrook_elderfield"
+    from: "millbrook"
+    to: "elderfield"
+  - id: "ashford_thornkeep"
+    from: "ashford"
+    to: "thornkeep"
 
 geography:
   forest: "Whisperwood"
@@ -101,3 +137,8 @@ geography:
     - "The Old Mill"
     - "Dawn Hill"
     - "Whisperwood Edge"
+    - "The Standing Stones"
+    - "Raven's Crossing"
+    - "The Sunken Road"
+    - "Widow's Peak"
+    - "The Bone Fields"

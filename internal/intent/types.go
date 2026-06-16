@@ -54,6 +54,12 @@ const (
 	ActionSave      Action = "save"
 	ActionBranch    Action = "branch"
 	ActionSwitch    Action = "switch"
+	ActionListen    Action = "listen"
+	ActionWait      Action = "wait"
+	ActionWalk      Action = "walk"
+	ActionSearch    Action = "search"
+	ActionPray      Action = "pray"
+	ActionStatus    Action = "status"
 	ActionUnknown   Action = ""
 )
 
@@ -65,6 +71,8 @@ func AllActions() []Action {
 		ActionLook, ActionInventory, ActionSleep, ActionTravel,
 		ActionTalk, ActionInspect, ActionBuy, ActionSell,
 		ActionTime, ActionSave, ActionBranch, ActionSwitch,
+		ActionListen, ActionWait, ActionWalk, ActionSearch,
+		ActionPray, ActionStatus,
 	}
 }
 
@@ -151,25 +159,56 @@ func (i Intent) String() string {
 // `look` or `inventory` without burning an LLM round trip.
 var alias = map[string]Action{
 	// look
-	"l":     ActionLook,
-	"watch": ActionLook,
+	"l":      ActionLook,
+	"watch":  ActionLook,
+	"survey": ActionLook,
 	// inventory
 	"i":   ActionInventory,
 	"inv": ActionInventory,
 	// travel
-	"go":   ActionTravel,
-	"walk": ActionTravel,
-	"move": ActionTravel,
+	"go":    ActionTravel,
+	"move":  ActionTravel,
+	"enter": ActionTravel,
+	"visit": ActionTravel,
+	"head":  ActionTravel,
+	// walk (interactive exploration)
+	"walk": ActionWalk,
 	// talk
 	"say":    ActionTalk,
 	"chat":   ActionTalk,
 	"speak":  ActionTalk,
 	"ask":    ActionTalk,
+	"greet":  ActionTalk,
+	"converse": ActionTalk,
 	// inspect
-	"x":       ActionInspect,
-	"examine": ActionInspect,
-	"check":   ActionInspect,
-	"lookat":  ActionInspect,
+	"x":        ActionInspect,
+	"examine":  ActionInspect,
+	"check":    ActionInspect,
+	"lookat":   ActionInspect,
+	"study":    ActionInspect,
+	"observe":  ActionInspect,
+	// listen
+	"listen": ActionListen,
+	"hear":   ActionListen,
+	"eavesdrop": ActionListen,
+	// wait
+	"wait":    ActionWait,
+	"linger":  ActionWait,
+	// search
+	"search": ActionSearch,
+	"rummage": ActionSearch,
+	"scavenge": ActionSearch,
+	"forage": ActionSearch,
+	// pray
+	"pray":    ActionPray,
+	"worship": ActionPray,
+	"meditate": ActionPray,
+	// status
+	"status": ActionStatus,
+	"health": ActionStatus,
+	"where":  ActionStatus,
+	"map":    ActionStatus,
+	"journal": ActionStatus,
 	// time
 	"date": ActionTime,
 	"now":  ActionTime,
@@ -177,7 +216,7 @@ var alias = map[string]Action{
 	// save
 	"snapshot": ActionSave,
 	// branch
-	"fork":   ActionBranch,
+	"fork": ActionBranch,
 	// switch
 	"checkout": ActionSwitch,
 	"goto":     ActionSwitch,

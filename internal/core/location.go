@@ -83,6 +83,13 @@ type Location struct {
 	// engine seeds them from the worldpack catalog at Init.
 	Prices Prices
 
+	// Buildings is the list of named buildings/landmarks at this
+	// location (e.g., "Inn", "Market", "Smithy"). Populated from
+	// the worldpack's entities.yaml. The walk and look commands
+	// use this to support intra-settlement exploration ("walk to
+	// the inn").
+	Buildings []string
+
 	// LastShortageTick is the last tick at which this location
 	// was in food shortage (Settlement.Food below the
 	// EconomyEngine's shortageThreshold). The engine uses this

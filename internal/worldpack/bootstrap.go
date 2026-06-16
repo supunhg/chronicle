@@ -38,7 +38,9 @@ func Bootstrap(pack *Pack, w *core.World, seed int64) error {
 
 	// 1. Locations
 	for _, ls := range pack.Locations {
-		w.AddLocation(core.NewLocation(ls.ID, ls.Name, ls.Region, ls.PopulationCap))
+		loc := core.NewLocation(ls.ID, ls.Name, ls.Region, ls.PopulationCap)
+		loc.Buildings = ls.Buildings
+		w.AddLocation(loc)
 	}
 
 	// 2. Factions

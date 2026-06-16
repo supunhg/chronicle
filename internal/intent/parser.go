@@ -124,6 +124,19 @@ func (p *Parser) parseRule(raw string) (Intent, bool) {
 	case ActionSwitch:
 		intent, ok := p.ruleNameArg(raw, rest, ActionSwitch)
 		return intent, ok
+	case ActionListen:
+		return p.ruleLook(raw, rest), true // same shape as look: optional target
+	case ActionWait:
+		intent, ok := p.ruleWait(raw, rest)
+		return intent, ok
+	case ActionWalk:
+		return p.ruleWalk(raw, rest), true
+	case ActionSearch:
+		return p.ruleLook(raw, rest), true // same shape: optional target
+	case ActionPray:
+		return Intent{Action: verb, Raw: raw, Source: "rule"}, true
+	case ActionStatus:
+		return Intent{Action: verb, Raw: raw, Source: "rule"}, true
 	}
 	return Intent{}, false
 }
@@ -217,6 +230,36 @@ func (p *Parser) ruleTrade(raw string, rest []string, verb Action) (Intent, bool
 		Action: verb,
 		Target: target,
 		Args:   Args{Quantity: qty},
+		Raw:    raw,
+		Source: "rule",
+	}, true
+}
+
+// ruleWalk handles `walk` and `walk <direction>`. Bare `walk`
+// enters interactive mode (the REPL asks for direction).
+// `walk north` or `walk to the market` passes the target through.
+func (p *Parser) ruleWalk(raw string, rest []string) Intent {
+	target := stripPreposition(rest, "to", "toward", "towards")
+	return Intent{Action: ActionWalk, Target: target, Raw: raw, Source: "rule"}
+}
+
+// ruleWait handles `wait [hours]`. Similar to sleep but
+// defaults to 1 hour instead of 8. Bare `wait` means "wait
+// briefly and observe". A number is interpreted as hours.
+// Non-numeric input falls through (returns ok=false) so the
+// LLM can interpret freeform commands like "wait for elena".
+func (p *Parser) ruleWait(raw string, rest []string) (Intent, bool) {
+	hours := 1
+	if len(rest) > 0 {
+		if h, err := strconv.Atoi(rest[0]); err == nil && h > 0 {
+			hours = h
+		} else {
+			return Intent{}, false
+		}
+	}
+	return Intent{
+		Action: ActionWait,
+		Args:   Args{Hours: hours},
 		Raw:    raw,
 		Source: "rule",
 	}, true

@@ -540,11 +540,11 @@ func TestREPL_SaveDefaultPath(t *testing.T) {
 // Intent is dispatched to execLook.
 func TestREPL_IntentParserWiring(t *testing.T) {
 	w := newTestWorld()
-	// "greet" is not an alias → rule parser fails → LLM
+	// "hail" is not an alias → rule parser fails → LLM
 	// fallback is called (but LLM is nil in the test
 	// parser, so it returns an error). The REPL should
 	// surface that error.
-	out := runREPL(t, w, "greet alice\nquit\n", Options{})
+	out := runREPL(t, w, "hail alice\nquit\n", Options{})
 	if !strings.Contains(out, "error:") {
 		t.Errorf("output missing 'error:' for unknown verb: %q", out)
 	}
