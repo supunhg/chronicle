@@ -155,7 +155,7 @@ func (m *Manager) generateNPCResponse(ctx context.Context, playerMsg string) str
 	}
 
 	messages := []llm.ChatMessage{
-		{Role: "system", Content: m.buildSystemPrompt(npc)},
+		{Role: "system", Content: m.buildSystemPrompt(npc, playerMsg)},
 		{Role: "user", Content: m.buildUserPrompt(npc, playerMsg)},
 	}
 
@@ -177,7 +177,11 @@ func (m *Manager) generateNPCResponse(ctx context.Context, playerMsg string) str
 // personality, knowledge, and behavioral rules. This is where the
 // simulation data becomes the game — relationship scores, memories,
 // traits, and family ties all shape how the NPC speaks.
-func (m *Manager) buildSystemPrompt(npc *core.Person) string {
+//
+// playerMsg is the most recent thing the player said. It is scanned
+// for references to locations or people so the NPC can gossip about
+// them naturally (via BuildLocationGossip / BuildPersonGossip).
+func (m *Manager) buildSystemPrompt(npc *core.Person, playerMsg string) string {
 	var b strings.Builder
 
 	b.WriteString("You are a character in a medieval frontier world called The Free Marches. ")
@@ -325,6 +329,24 @@ func (m *Manager) buildSystemPrompt(npc *core.Person) string {
 		b.WriteString(gossipCtx)
 	}
 
+	// If the player mentioned a specific location, inject gossip about it.
+	if ref := m.detectLocationReference(playerMsg); ref != "" {
+		if gossip := BuildLocationGossip(m.world, npc, ref); gossip != "" {
+			b.WriteString("\n== ABOUT A PLACE THEY ASKED ABOUT ==\n")
+			b.WriteString(gossip)
+			b.WriteString("\nWork this knowledge into your response naturally.\n")
+		}
+	}
+
+	// If the player mentioned a specific person, inject gossip about them.
+	if ref := m.detectPersonReference(playerMsg); ref != nil {
+		if gossip := BuildPersonGossip(m.world, npc, ref); gossip != "" {
+			b.WriteString("\n== ABOUT A PERSON THEY ASKED ABOUT ==\n")
+			b.WriteString(gossip)
+			b.WriteString("\nWork this knowledge into your response naturally.\n")
+		}
+	}
+
 	b.WriteString("\nRespond ONLY as your character. Do not include stage directions, asterisks, or narrator commentary. Just speak naturally. " +
 		"You may share gossip, ask questions, boast, complain, or talk about other people and places you know.\n")
 
@@ -446,6 +468,113 @@ func describeRelationship(b *strings.Builder, rel *core.Relationship) {
 		b.WriteString("You find them attractive and are a bit flustered. ")
 	}
 	b.WriteString("\n")
+}
+
+// detectLocationReference checks whether the player's message mentions
+// a known location by name (case-insensitive). Returns the canonical
+// location ID or "" if no match. This powers the NPC's ability to
+// gossip about places the player asks about.
+//
+// Uses word-boundary matching: the location name must appear as a
+// complete phrase in the message (not a substring of another word).
+// Multi-word names like "Blackwater Crossing" are matched as a phrase.
+func (m *Manager) detectLocationReference(msg string) string {
+	if msg == "" {
+		return ""
+	}
+	lower := strings.ToLower(msg)
+	// Check all known locations; prefer longest name match.
+	var best string
+	var bestLen int
+	for id, loc := range m.world.Locations {
+		name := strings.ToLower(loc.Name)
+		if nameMatch(lower, name) && len(name) > bestLen {
+			best = id
+			bestLen = len(name)
+		}
+	}
+	return best
+}
+
+// detectPersonReference checks whether the player's message mentions
+// a known living person by name (case-insensitive). Returns the
+// Person or nil. If multiple people share a name, prefers one the
+// NPC has a relationship with.
+//
+// Uses word-boundary matching to avoid false positives (e.g. "Art"
+// matching "start"). Multi-word names are matched as a phrase.
+func (m *Manager) detectPersonReference(msg string) *core.Person {
+	if msg == "" {
+		return nil
+	}
+	if m.current == nil {
+		return nil
+	}
+	lower := strings.ToLower(msg)
+	npcID := m.current.NPCID
+
+	var best *core.Person
+	var bestLen int
+	for _, p := range m.world.People {
+		if !p.Alive {
+			continue
+		}
+		if p.ID == npcID {
+			continue // don't match the NPC talking
+		}
+		name := strings.ToLower(p.Name)
+		if !nameMatch(lower, name) {
+			continue
+		}
+		// Prefer longest match.
+		if len(name) < bestLen {
+			continue
+		}
+		// Tie-break: prefer one the NPC has a relationship with.
+		if len(name) == bestLen && best != nil {
+			hasBestRel := m.findRelationship(npcID, best.ID) != nil
+			hasCurRel := m.findRelationship(npcID, p.ID) != nil
+			if hasBestRel && !hasCurRel {
+				continue
+			}
+		}
+		best = p
+		bestLen = len(name)
+	}
+	return best
+}
+
+// nameMatch checks whether name appears as a complete word or phrase
+// in msg (case-insensitive). Uses word-boundary detection: the name
+// must be preceded by the start of the string or a space/punctuation,
+// and followed by the end of the string or a space/punctuation.
+// This prevents "inn" from matching "inner" or "Art" from matching
+// "start".
+func nameMatch(msg, name string) bool {
+	idx := strings.Index(msg, name)
+	for idx >= 0 {
+		// Check start boundary.
+		startOK := idx == 0 || !isAlpha(msg[idx-1])
+		// Check end boundary.
+		end := idx + len(name)
+		endOK := end >= len(msg) || !isAlpha(msg[end])
+		if startOK && endOK {
+			return true
+		}
+		// Not a word boundary match; try the next occurrence.
+		start := idx + 1
+		next := strings.Index(msg[start:], name)
+		if next < 0 {
+			break
+		}
+		idx = start + next
+	}
+	return false
+}
+
+// isAlpha reports whether b is an ASCII letter.
+func isAlpha(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 // level returns a word description for a 0-100 score.
