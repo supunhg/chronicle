@@ -8,6 +8,13 @@ acceptance test, and a status. The full spec is in
 **Legend:** ✅ done (committed) · 🔧 done (in working tree, uncommitted)
 · ⬜ not started · ⚠️ partially done
 
+> **Note:** Phases 30–33 were completed as shipped work. Phases 31–33
+> were repurposed from earlier placeholder definitions (REPL inspection,
+> `--no-llm`, World AI) to match the actual work done (time advancement,
+> stress testing, immersive text adventure transformation). The original
+> placeholder phases were renumbered accordingly (old 31→34, old 32→34,
+> old 33→35).
+
 ---
 
 ## Phase 26 — Stability & Persistence Validation (in progress)
@@ -42,25 +49,43 @@ acceptance test, and a status. The full spec is in
 
 | Sub | Goal | Acceptance test | Status |
 |---|---|---|---|
-| **30** | Auto-succession + 5 continuation modes (Heir/Family/Character/Observer/End Bloodline) + legacy record on death | `TestLineageTransfer` | ⬜ not started |
+| **30** | Auto-succession + 5 continuation modes (Heir/Family/Character/Observer/End Bloodline) + legacy record on death | `TestLineageTransfer` | ✅ done |
+| **30.1** | Lineage end-to-end playtest (5 tests: heir/successors/observer/end_bloodline/no-candidates) | `TestLineagePlaytest_*` | ✅ done |
 
-## Phase 31 — REPL relationship/memory inspection
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **31** | `relations <name>` / `memories <name>` / `mood` / `goals` commands | `TestREPL_Relations`, `TestREPL_Memories` | ⬜ not started |
-
-## Phase 32 — `--no-llm` flag
+## Phase 31 — Action-duration time advancement
 
 | Sub | Goal | Acceptance test | Status |
 |---|---|---|---|
-| **32** | Disable LLM entirely (template + rule parser only) | `TestNoLLM` | ⬜ not started |
+| **31** | Travel/sleep/walk advance simulation ticks via full tick pipeline (SetTickFn). Phase 31 wires the per-tick callback so player actions trigger the same world evolution as auto-tick. | `TestTravelAdvancesTicks`, `TestSleepAdvancesTicks` | ✅ done |
 
-## Phase 33 — World AI (weekly)
+## Phase 32 — 10-seed stress test + determinism audit
 
 | Sub | Goal | Acceptance test | Status |
 |---|---|---|---|
-| **33** | Asynchronous rumor/legend/religious-text generation on a weekly tick | `TestWorldAI_GeneratesRumors` | ⬜ not started |
+| **32** | 10 seeds × 200 years, all hash-match replay. Determinism audit of engine iteration order, RNG streams, and retention caps. | `TestStressReplay` | ✅ done |
+
+## Phase 33 — Immersive text adventure transformation
+
+| Sub | Goal | Acceptance test | Status |
+|---|---|---|---|
+| **33** | Reshape Chronicle from a simulation dashboard into a living fantasy world. Overhaul narrator (second-person sensory), add adventure verbs (search, pray, status), expand worldpack (7 locations, 30+ buildings, 8 landmarks, 8 trade routes), rewrite help text. | Build + all tests pass | ✅ done |
+| **33.1** | Update README.md to reflect immersive text adventure vision | README rewrite | ✅ done |
+| **33.2** | Wire BuildLocationGossip and BuildPersonGossip into conversation system. NPCs now respond with what they know when asked about places or people. Word-boundary matching via nameMatch helper. | `go build` + `go vet` clean | ✅ done |
+| **33.3** | Update all narrator template renderers (tplLook, tplTalk, tplTravel, tplDeath, tplBirth, tplFirstMeet, tplTime, tplInventory) to immersive second-person voice. Fix NPCActivity pronoun clashes. Gendered pronouns (He/She/They, his/her/their). | All narrator + repl tests pass | ✅ done |
+| **33.4** | Make resolveStatus produce immersive narrative output (LLM-first character journal). Replace simulation dashboard character sheet with flowing prose. | All action tests pass | ✅ done |
+| **33.5** | Extract duplicated gendered pronoun logic into pronounSubject, pronounPossessive, genderNoun helpers. | All tests pass unchanged | ✅ done |
+
+## Phase 34 — `--no-llm` flag
+
+| Sub | Goal | Acceptance test | Status |
+|---|---|---|---|
+| **34** | Disable LLM entirely (template + rule parser only) | `TestNoLLM` | ⬜ not started |
+
+## Phase 35 — World AI (weekly)
+
+| Sub | Goal | Acceptance test | Status |
+|---|---|---|---|
+| **35** | Asynchronous rumor/legend/religious-text generation on a weekly tick | `TestWorldAI_GeneratesRumors` | ⬜ not started |
 
 ## Phase 34 — LLM cache
 
@@ -117,21 +142,27 @@ After those three, the path to "playable v1" is:
 - Phase 26.D (CourtAction perf — unblocks the v1 acceptance suite)
 - Phase 40 (final acceptance)
 
-## Status after Phase 28 + 29 (this commit)
+## Status after Phase 33
 
-The user can now play the game end-to-end:
+The user can now play an immersive text adventure:
 
 ```bash
 ./chronicle new mygame --seed 42 -repl
-> help
-> look
-> people
-> talk elena
-> travel blackwater
-> sleep
-> auto-tick on
-> save mygame-saved.db
-> quit
+> look                        # atmospheric scene description
+> walk                         # interactive destination picker (buildings with → prefix)
+> walk to the inn              # building exploration with unique atmospherics
+> talk elena                   # NPC speaks in character, shares gossip
+> tell me about millbrook      # NPC shares what they know about the place
+> search                       # atmospheric search results
+> pray                         # temple detection, seasonal reflection
+> status                       # immersive narrative character journal
+> inspect marcus               # rich person description
+> listen                       # ambient sounds and overheard conversations
+> travel millbrook             # journey narration with terrain, encounters, weather
+> inventory                    # immersive inventory check
+> time                         # seasonal/time description
+> save                         # save your world
+> quit                         # leave the world
 ```
 
 …and resume later with `./chronicle resume mygame.db -repl`.

@@ -46,11 +46,21 @@ Frontier League — each with their own goals, allies, and rivals.
 everything you do. Look around and get sensory-rich scene descriptions.
 Walk between settlements and encounter hawks, waymarkers, merchants
 on the road. Enter buildings and feel the warmth of the inn's hearth
-or the heat of the smithy's forge.
+or the heat of the smithy's forge. All narrator templates use
+second-person sensory voice matching the LLM system prompt — no
+jarring switches between LLM and template modes.
 
 **NPC dialogue** — Multi-turn conversations with LLM-driven NPCs who
-speak in character, share gossip about people and places, reference
-their memories and relationships, and react to your trust level.
+speak in character, share gossip about people and places (ask "tell me
+about Millbrook" or "what do you think of Elena"), reference their
+memories and relationships, and react to your trust level. Gossip
+system injects NPC knowledge about locations and people into dialogue.
+
+**Character journal** — The `status` command produces an immersive
+narrative moment of introspection — flowing prose about your identity,
+wealth, family, and recent experiences. Coin amounts graded into
+sensory descriptions, family references are emotional, memories woven
+into reflection. No bullet points, no data dumps.
 
 **Exploration** — Walk interactively (pick a destination, choose your
 distance). Search buildings and surroundings. Pray at temples. Listen
@@ -58,8 +68,8 @@ to the world around you. Every command produces atmospheric text.
 
 **20+ verbs** — look, inspect, talk, walk, travel, search, listen,
 pray, wait, sleep, buy, sell, inventory, status, time, people, save,
-branch, switch, character, and more. Natural language aliases ("go",
-"enter", "visit", "examine", "rummage", "worship", etc.).
+branch, switch, character, and more. 45+ natural language aliases
+("go", "enter", "visit", "examine", "rummage", "worship", etc.).
 
 ### The Engine
 

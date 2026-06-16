@@ -192,20 +192,22 @@ The engine loads packs dynamically. The pack is the unit of genre.
 chronicle/
   cmd/chronicle/         # main entry point + CLI subcommands
   internal/
-    action/              # action engine (talk, travel, sleep, buy, sell, save, branch, switch)
+    action/              # action engine (20+ verbs: look, talk, travel, walk, search, pray, status, buy, sell, save, ...)
     cli/                 # (future) typed command definitions
-    core/                # domain types (World, Person, Relationship, Memory, …)
-    intent/              # intent parser (rule-based + LLM fallback)
+    conversation/        # NPC dialogue manager + gossip/rumor system
+    core/                # domain types (World, Person, Relationship, Memory, Location with Buildings, Goal, ...)
+    integration/         # integration tests (replay, stress, lineage, save/load round-trip)
+    intent/              # intent parser (rule-based + LLM fallback, 18 actions + 45+ aliases)
+    lineage/             # player death + succession + legacy records
     llm/                 # OpenCode Zen client, config, doctor
-    narrator/            # template renderer + LLM-gated narration
+    narrator/            # LLM-first atmospheric narration (scenes, people, walks, buildings, status, journeys)
     persistence/         # SQLite access, schema, migrations
-    repl/                # in-game REPL (12 verbs + auto-tick + advance)
-    simulation/          # engines: population, relationship, marriage, memory, goal, economy, event
+    repl/                # in-game REPL (interactive walk, conversation mode, adventure help)
+    simulation/          # 7 engines: population, relationship, marriage, memory, goal, economy, event
     tick/                # orchestration layer + deterministic RNG
     worldpack/           # YAML worldpack loader + bootstrap
-  worldpacks/frontier/   # v1 worldpack
+  worldpacks/frontier/   # "The Free Marches" — 7 locations, 30+ buildings, 8 landmarks, 8 trade routes
   docs/                  # design + determinism docs
-  chronicle-spec.md      # DEPRECATED — content merged into this file
   SIMULATION_TICK_SPEC.md
   ARCHITECTURE.md        # this file
   go.mod
@@ -572,7 +574,7 @@ imports both Tier 1 and Tier 2. It is also the only place that imports
 - Class: typically Lower or Middle
 - Starts inside the town of Blackwater
 
-### 11.2 Death and Succession (NOT YET IMPLEMENTED — Phase 30)
+### 11.2 Death and Succession (Phase 30 + 30.1)
 
 On death, the game computes a successor score:
 
@@ -828,6 +830,7 @@ tick is replayed on first open. The action engine writes branches to
 
 ```
 chronicle [play-flags]              # default; load a worldpack, bootstrap, simulate
+chronicle new <name> [--pack] [--seed]  # create a new world and optionally enter REPL
 chronicle save [flags]              # play + snapshot the post-tick world to a SQLite DB
 chronicle resume <db-path> [-ticks] # restore from a SQLite snapshot, simulate more
 chronicle info <db-path>            # print snapshot metadata (no ticks run)
@@ -859,11 +862,17 @@ These are deferred to a v1.1 polish.
 ## 17. In-Game REPL (current — fully functional)
 
 ```
-> look
-> look alice
-> inspect marcus
-> talk elena
-> travel blackwater
+> look                         # immersive scene description (LLM-first)
+> look alice                   # detailed person description
+> inspect marcus               # rich NPC inspection
+> talk elena                   # multi-turn NPC conversation (LLM-driven, memory-aware)
+> walk                         # interactive destination picker (buildings + settlements)
+> walk to the inn              # building exploration with unique atmospherics
+> search                       # atmospheric search results (5 varied outcomes)
+> pray                         # temple detection, seasonal reflection
+> status                       # immersive narrative character journal
+> listen                       # ambient sounds, overheard conversations
+> travel blackwater            # journey narration with terrain, encounters, weather
 > sleep [hours]
 > inventory
 > time
@@ -873,16 +882,15 @@ These are deferred to a v1.1 polish.
 > branch before_war
 > switch merchant_path
 > people
-> auto-tick on
-> auto-tick off
-> advance day
-> advance week
-> advance month
-> quit
-> exit
+> auto-tick on / off
+> advance day / week / month
+> quit / exit
 ```
 
-Aliases: `i` → inventory, `date` → time.
+Aliases: `i` → inventory, `date` → time, `go/move/enter/visit/head` → travel,
+`say/chat/speak/ask/greet/converse` → talk, `x/examine/check/study/observe` → inspect,
+`listen/hear/eavesdrop` → listen, `wait/linger` → wait, `rummage/scavenge/forage` → search,
+`worship/meditate` → pray, `health/where/map/journal` → status.
 
 ## 18. LLM Configuration
 
@@ -966,7 +974,7 @@ A player should be able to:
 - [ ] Form meaningful relationships that influence NPC behavior over time
 - [ ] Influence Blackwater's politics, economy, or culture
 - [ ] Leave descendants
-- [ ] Die and have the world continue
+- [x] Die and have the world continue (Phase 30 + 30.1: lineage end-to-end playtest)
 - [ ] Have the world generate stories worth retelling
 
 A test of merit: a 5-generation playthrough produces at least one story
