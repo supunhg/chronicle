@@ -537,16 +537,57 @@ func TestREPL_SaveDefaultPath(t *testing.T) {
 // TestREPL_IntentParserWiring verifies that typed
 // commands flow through the intent parser. The verb
 // "look" is matched by the rule parser; the resulting
-// Intent is dispatched to execLook.
+// Intent is dispatched to execLook. Unknown verbs get
+// a friendly in-character response instead of a raw error.
 func TestREPL_IntentParserWiring(t *testing.T) {
 	w := newTestWorld()
-	// "hail" is not an alias → rule parser fails → LLM
-	// fallback is called (but LLM is nil in the test
-	// parser, so it returns an error). The REPL should
-	// surface that error.
+	// "hail" is not an alias → rule parser fails → REPL
+	// gives a friendly response instead of a raw error.
 	out := runREPL(t, w, "hail alice\nquit\n", Options{})
-	if !strings.Contains(out, "error:") {
-		t.Errorf("output missing 'error:' for unknown verb: %q", out)
+	if strings.Contains(out, "error:") {
+		t.Errorf("unknown verb should get friendly response, not raw error: %q", out)
+	}
+	if !strings.Contains(out, "help") {
+		t.Errorf("unknown verb response should mention 'help': %q", out)
+	}
+}
+
+// TestREPL_GreetingInput verifies that greetings like "hi"
+// get a friendly nudge instead of a raw parser error.
+func TestREPL_GreetingInput(t *testing.T) {
+	w := newTestWorld()
+	out := runREPL(t, w, "hi\nquit\n", Options{})
+	if strings.Contains(out, "error:") {
+		t.Errorf("greeting should not produce raw error: %q", out)
+	}
+	if !strings.Contains(out, "talk") {
+		t.Errorf("greeting should suggest 'talk': %q", out)
+	}
+}
+
+// TestREPL_QuestionInput verifies that questions ending with "?"
+// get a helpful response instead of a raw parser error.
+func TestREPL_QuestionInput(t *testing.T) {
+	w := newTestWorld()
+	out := runREPL(t, w, "what is the meaning of life?\nquit\n", Options{})
+	if strings.Contains(out, "error:") {
+		t.Errorf("question should not produce raw error: %q", out)
+	}
+	if !strings.Contains(out, "help") {
+		t.Errorf("question should mention 'help': %q", out)
+	}
+}
+
+// TestREPL_UnknownVerbInput verifies that unknown verbs get
+// a friendly in-character fallback instead of a raw error.
+func TestREPL_UnknownVerbInput(t *testing.T) {
+	w := newTestWorld()
+	out := runREPL(t, w, "xyzzy\nquit\n", Options{})
+	if strings.Contains(out, "error:") {
+		t.Errorf("unknown verb should not produce raw error: %q", out)
+	}
+	if !strings.Contains(out, "mutter") {
+		t.Errorf("unknown verb should have in-character fallback: %q", out)
 	}
 }
 

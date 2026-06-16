@@ -423,12 +423,14 @@ func (r *REPL) execute(ctx context.Context, line string) error {
 	if lower == "character" {
 		r.execCharacter("")
 		return nil
-	}
-	// Everything else → intent parser → dispatch.
-	in, err := r.parser.Parse(ctx, line)
-	if err != nil {
-		return err
-	}
+	}		// Everything else → intent parser → dispatch.
+		in, err := r.parser.Parse(ctx, line)
+		if err != nil {
+			// The parser couldn't understand the input (unknown verb,
+			// LLM failed, etc.). Give a friendly in-character response
+			// instead of a raw parser error.
+			return r.handleUnknownInput(line)
+		}
 	return r.dispatch(in)
 }
 
@@ -1125,6 +1127,41 @@ func capitalizeFirst(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// handleUnknownInput gives a friendly in-character response when the
+// parser can't understand the player's input. Instead of showing a raw
+// parser error, it nudges the player toward valid commands while
+// staying in the world's voice.
+//
+// NOTE: conversation-active input is already routed to the conversation
+// manager in execute() before the parser is called, so this method only
+// runs when no conversation is active.
+func (r *REPL) handleUnknownInput(line string) error {
+	lower := strings.ToLower(strings.TrimSpace(line))
+
+	// Greetings → suggest talking to someone
+	if greetings[lower] {
+		fmt.Fprintln(r.out, "You nod to no one in particular. If you want to speak with someone, try 'talk <name>'.")
+		return nil
+	}
+
+	// Questions → suggest help
+	if strings.HasSuffix(lower, "?") {
+		fmt.Fprintln(r.out, "The world does not answer questions directly. Try 'look', 'status', or 'help' to get your bearings.")
+		return nil
+	}
+
+	// Generic fallback
+	fmt.Fprintf(r.out, "You mutter '%s' under your breath. Try 'help' for a list of commands.\n", line)
+	return nil
+}
+
+// greetings is the set of casual inputs that should get a friendly
+// nudge instead of a parser error. Allocated once at package level.
+var greetings = map[string]bool{
+	"hi": true, "hello": true, "hey": true,
+	"greetings": true, "hola": true, "yo": true,
 }
 
 // distanceTicks maps the distance choice to tick advancement:
