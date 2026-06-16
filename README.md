@@ -1,55 +1,81 @@
 # Chronicle
 
-> A persistent reality simulation engine where autonomous individuals
-> remember, form relationships, pursue goals, create history, and
-> continue existing long after the player leaves or dies.
+> You are not watching a simulation. You are living in a world.
+>
+> A frontier of villages and towns, where autonomous people remember,
+> form relationships, pursue goals, and create history — whether you
+> are there to witness it or not.
 
-Chronicle is a Go implementation of the spec in
-[`ARCHITECTURE.md`](./ARCHITECTURE.md). The determinism contract is in
-[`docs/DETERMINISM.md`](./docs/DETERMINISM.md). The simulation tick order
-is in [`SIMULATION_TICK_SPEC.md`](./SIMULATION_TICK_SPEC.md).
+Chronicle is an immersive text adventure powered by a persistent
+reality simulation engine. You ARE your character. You walk the
+cobblestone streets, talk to the blacksmith, search the ruins, pray
+at the temple, and live your life in The Free Marches.
 
-> **Status:** Phases 1–25 committed. Phase 26 (Stability & Persistence
-> Validation) in progress. The simulation substrate is solid; the player
-> experience layer (lineage transfer, `chronicle new`, `help` command,
-> LLM-driven narration) is the v1 work remaining. See
-> [`PHASES.md`](./PHASES.md) for the checklist.
+The simulation runs 7 production engines under the hood — population,
+relationships, marriage, memory, goals, economy, and events — but the
+player experiences it as a living, breathing world.
+
+> **Status:** The simulation substrate is solid. The immersive text
+> adventure layer (atmospheric narration, NPC dialogue, exploration,
+> gossip system) is active and growing. See
+> [`PHASES.md`](./PHASES.md) for the roadmap.
 
 ## What's in the box
 
-**Simulation core** — all 7 production engines wired through a
-deterministic tick loop:
+### The Living World
 
-- **Population** — aging, mortality, births, migration, family trees
-- **Relationship** — co-location bond formation, axis decay toward neutral, O(1) memory-delta application
-- **Marriage** — pair matching with trust/age/class constraints
-- **Memory** — causally-anchored birth/death records with TrustDelta/RelationshipDelta baked into the relationship cache
-- **Goal** — utility AI with hierarchical goals and a 3-layer action system
-- **Economy** — closed production/consumption loops, price recalc, shortage detection
-- **Event** — 4 state-driven rules (Famine, Crime, Political, Religious) with per-(rule, location) cooldown
+**The Free Marches** — a frontier region with 7 locations, each with
+its own buildings, people, and character. Blackwater is the bustling
+town (12 buildings including The Drunken Fox Inn, Black Duck Tavern,
+River Docks). Four villages, a monastery, and a fort each have their
+own buildings. 8 landmarks dot the landscape (Standing Stones,
+Raven's Crossing, Widow's Peak). 8 trade routes connect them all.
 
-**Persistence** — SQLite with 4 migrations; full save/load round-trip
-preserves every field `core.WorldHash` covers.
+**150 autonomous NPCs** — each with personality traits, needs, goals,
+memories, family ties, and relationships across 5 axes (trust, respect,
+fear, attraction, loyalty). They work, gossip, marry, have children,
+migrate, and pursue their ambitions whether you interact with them
+or not.
 
-**CLI** — 6 subcommands: `play` (default), `save`, `resume`, `info`,
-`diff`, `doctor`. All play-tick subcommands support `-repl`.
+**4 factions** — Merchant Guild, Town Council, Faith of the Dawn,
+Frontier League — each with their own goals, allies, and rivals.
 
-**In-game REPL** — fully functional. 12 verbs (`look`, `inspect`, `talk`,
-`travel`, `sleep`, `inventory`, `time`, `save`, `buy`, `sell`, `branch`,
-`switch`) plus meta-commands (`people`, `auto-tick on|off`, `advance
-day|week|month`, `quit`).
+### The Player Experience
 
-**LLM layer** — OpenAI-compatible client (`internal/llm`), env-var auth
-(`OPENCODE_ZEN_API_KEY`), `chronicle doctor` to validate. Narrator uses
-templates by default; LLM-gated for significant events. Intent parser
-falls back to the LLM for unknown verbs.
+**Immersive narration** — LLM-first atmospheric descriptions for
+everything you do. Look around and get sensory-rich scene descriptions.
+Walk between settlements and encounter hawks, waymarkers, merchants
+on the road. Enter buildings and feel the warmth of the inn's hearth
+or the heat of the smithy's forge.
 
-**Worldpack** — `worldpacks/frontier` ("The Free Marches") with 150 NPCs,
-4 factions, 1 town + 4 villages + monastery + fort + forest + river.
+**NPC dialogue** — Multi-turn conversations with LLM-driven NPCs who
+speak in character, share gossip about people and places, reference
+their memories and relationships, and react to your trust level.
+
+**Exploration** — Walk interactively (pick a destination, choose your
+distance). Search buildings and surroundings. Pray at temples. Listen
+to the world around you. Every command produces atmospheric text.
+
+**20+ verbs** — look, inspect, talk, walk, travel, search, listen,
+pray, wait, sleep, buy, sell, inventory, status, time, people, save,
+branch, switch, character, and more. Natural language aliases ("go",
+"enter", "visit", "examine", "rummage", "worship", etc.).
+
+### The Engine
+
+**7 simulation engines** — Population, Relationship, Marriage, Memory,
+Goal, Economy, Event. Deterministic tick loop with full replay
+validation.
+
+**Persistence** — SQLite with full save/load round-trip.
+
+**LLM layer** — OpenAI-compatible client. Narrator uses LLM for
+important moments, templates for routine events. Intent parser
+falls back to the LLM for unknown verbs. All LLM calls are
+rate-limited and cacheable.
 
 **Determinism** — `core.WorldHash` (SHA256) is the canonical state
-fingerprint; `TestDeterministicReplay` and `TestDifferentSeedsDiverge`
-are the v1 acceptance gates.
+fingerprint. Same seed + same actions = same world.
 
 ## Build, Test, Run
 
@@ -105,36 +131,28 @@ make tidy
 
 ### In-Game REPL
 
-After `./chronicle -repl`, you can type any of:
+After `./chronicle -repl`, you live in the world:
 
 ```
-> look
-> look alice
-> inspect marcus
-> talk elena
-> travel blackwater
-> sleep
-> sleep 8
-> inventory
-> time
-> save [path.db]
-> buy bread
-> sell sword
-> branch before_war
-> switch merchant_path
-> people
-> auto-tick on
-> auto-tick off
-> advance day
-> advance week
-> advance month
-> quit
+> look                        Take in your surroundings
+> walk                         Wander interactively (pick where to go)
+> walk to the inn              Walk to a specific building
+> talk elena                   Start a conversation (NPC speaks in character)
+> search                       Search your surroundings
+> pray                         Find a quiet moment of reflection
+> status                       Your character journal
+> inspect marcus               Study someone in detail
+> listen                       Pause and listen to the world
+> travel millbrook             Journey to another settlement
+> buy bread                    Trade with merchants
+> inventory                    Check what you're carrying
+> time                         What season and hour is it?
+> save                         Save your world
+> quit                         Leave the world
 ```
 
-Aliases: `i` → `inventory`, `date` → `time`.
-
-All output goes to **stderr** (metadata, progress, summaries). The
-binary is silent on stdout.
+During conversations, just type naturally. Say "bye" to end.
+All output goes to **stderr**.
 
 ## API Keys
 
@@ -158,21 +176,23 @@ A `--no-llm` flag for explicit disable is on the roadmap
 chronicle/
 ├── cmd/chronicle/         # main entry point + CLI subcommands
 ├── internal/
-│   ├── action/            # action engine (talk, travel, sleep, buy, sell, save, branch, switch)
-│   ├── core/              # domain types (World, Person, Relationship, Memory, ...)
-│   ├── intent/            # intent parser (rule-based + LLM fallback)
-│   ├── llm/               # OpenCode Zen client, config, doctor
-│   ├── narrator/          # template renderer + LLM-gated narration
+│   ├── action/            # action engine (20+ verbs including walk, search, pray, status)
+│   ├── conversation/      # NPC dialogue + gossip/rumor system
+│   ├── core/              # domain types (World, Person, Relationship, Memory, Location with Buildings)
+│   ├── intent/            # intent parser (rule-based + LLM fallback, 18 actions + 30+ aliases)
+│   ├── llm/               # OpenAI-compatible client, config, doctor
+│   ├── narrator/          # LLM-first atmospheric narration (scenes, people, walks, buildings, journeys)
 │   ├── persistence/       # SQLite-backed storage + migrations
-│   ├── repl/              # in-game REPL (12 verbs + auto-tick + advance)
-│   ├── simulation/        # 7 engines + marriage
+│   ├── repl/              # in-game REPL (interactive walk, conversation mode, adventure help)
+│   ├── simulation/        # 7 engines: population, relationship, marriage, memory, goal, economy, event
 │   ├── tick/              # orchestration layer + deterministic RNG
+│   ├── lineage/           # player death + succession + legacy records
 │   └── worldpack/         # YAML worldpack loader + bootstrap
-├── worldpacks/frontier/   # the v1 worldpack ("The Free Marches")
+├── worldpacks/frontier/   # "The Free Marches" — 7 locations, 30+ buildings, 8 landmarks
 ├── docs/DETERMINISM.md    # determinism contract
 ├── SIMULATION_TICK_SPEC.md
-├── ARCHITECTURE.md        # canonical v1 spec (vision + design + DoD)
-├── PHASES.md              # v1 phase checklist
+├── ARCHITECTURE.md        # canonical spec (vision + design + DoD)
+├── PHASES.md              # roadmap
 ├── go.mod
 ├── go.sum
 └── Makefile
