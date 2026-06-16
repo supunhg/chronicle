@@ -429,7 +429,7 @@ func (e *Engine) resolveWalk(target string, distMod int) Result {
 			}
 		}
 		// No location or building found — describe walking in that direction
-		text := e.describeWalkingNowhere(target)
+		text := e.describeWalkingNowhere()
 		return Result{OK: true, Text: text, TicksAdvanced: 0}
 	}
 	if destination.ID == player.LocationID {
@@ -477,25 +477,24 @@ func (e *Engine) resolveWalk(target string, distMod int) Result {
 }
 
 // describeWalkingNowhere generates an atmospheric description when the
-// player walks in a direction with no specific destination.
-func (e *Engine) describeWalkingNowhere(direction string) string {
+// player walks somewhere that doesn't match any destination.
+func (e *Engine) describeWalkingNowhere() string {
 	player := e.player()
 	if player == nil {
-		return fmt.Sprintf("You walk %s, but there's nothing notable in that direction.", direction)
+		return "You wander aimlessly, but there's nothing notable nearby."
 	}
 	loc, ok := e.world.Locations[player.LocationID]
 	if !ok {
-		return fmt.Sprintf("You walk %s. The path is unfamiliar.", direction)
+		return "You wander off the known paths. The landscape is unfamiliar."
 	}
-	// Try narrator for atmospheric nowhere-walk
 	if e.narrator != nil {
 		season := narrator.SeasonFromTick(e.world.Tick)
 		timeDesc := narrator.TimeOfDayFromTick(e.world.Tick)
-		return fmt.Sprintf("You wander %s from %s in the %s %s air. The countryside stretches before you — meadows, scattered trees, and the distant hum of frontier life. After a pleasant stroll, you find yourself back where you started, refreshed by the outing.",
-			direction, loc.Name, strings.ToLower(timeDesc), strings.ToLower(season))
+		return fmt.Sprintf("You wander out from %s in the %s %s air. The countryside stretches before you — meadows, scattered trees, and the distant hum of frontier life. After a pleasant stroll, you find yourself back where you started, refreshed by the outing.",
+			loc.Name, strings.ToLower(timeDesc), strings.ToLower(season))
 	}
-	return fmt.Sprintf("You walk %s from %s. The countryside stretches before you. After a pleasant stroll, you find yourself back where you started.",
-		direction, loc.Name)
+	return fmt.Sprintf("You wander out from %s. The countryside stretches before you. After a pleasant stroll, you find yourself back where you started.",
+			loc.Name)
 }
 
 // ConnectedLocations returns a sorted list of destination names the
