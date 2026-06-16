@@ -1119,3 +1119,257 @@ func TimeOfDayFromTick(tick int64) string {
 	phases := []string{"early morning", "morning", "midday", "afternoon", "evening", "night"}
 	return phases[int(tick)%len(phases)]
 }
+
+// DescribeStatus generates an immersive narrative status report for
+// the player — a moment of introspection rather than a data dump.
+// LLM-first: builds rich context (identity, location, family,
+// wealth, recent memories, relationships) and asks the LLM to
+// produce flowing prose. Falls back to a narrative template that
+// reads like a character's inner monologue.
+func (n *Narrator) DescribeStatus(ctx context.Context, w *core.World) string {
+	if w == nil || w.PlayerID == "" {
+		return "You pause, but cannot recall who you are."
+	}
+	player, ok := w.People[w.PlayerID]
+	if !ok || !player.Alive {
+		return "You try to take stock, but your thoughts scatter like leaves in the wind."
+	}
+	loc, lok := w.Locations[player.LocationID]
+
+	coin := w.Coin
+	inventory := w.Inventory
+
+	// Try LLM for rich narrative status
+	if n.llm != nil {
+		text, err := n.callStatusLLM(ctx, w, player, loc, lok, coin, inventory)
+		if err == nil && strings.TrimSpace(text) != "" {
+			return text
+		}
+	}
+
+	// Narrative template fallback
+	return n.statusTemplate(w, player, loc, lok, coin, inventory)
+}
+
+// callStatusLLM builds a rich status prompt and calls the LLM.
+func (n *Narrator) callStatusLLM(ctx context.Context, w *core.World, player *core.Person, loc *core.Location, hasLoc bool, coin int, inventory map[string]core.Item) (string, error) {
+	sysPrompt := "You are the narrator of an immersive medieval text adventure set in The Free Marches, a frontier region. " +
+		"The player has paused to reflect on their situation. Write a brief, atmospheric character journal entry in second person. " +
+		"Weave their identity, location, wealth, family, and recent experiences into flowing prose — like a character's inner monologue. " +
+		"Do NOT list facts in bullet points or headers. Instead, paint a picture of who they are and where they stand in the world. " +
+		"Keep it to one vivid paragraph (4-8 sentences). Include sensory details — the feel of coin in their pocket, the weight of their pack, the sounds around them. " +
+		"Do not break the fourth wall or mention game mechanics."
+
+	var userPrompt strings.Builder
+	fmt.Fprintf(&userPrompt, "Character: %s\n", player.Name)
+	fmt.Fprintf(&userPrompt, "Age: %d, Gender: %s, Class: %s\n", player.AgeAt(w.Tick), player.Gender, player.Class)
+	if player.Occupation != "" {
+		fmt.Fprintf(&userPrompt, "Occupation: %s\n", player.Occupation)
+	}
+	if hasLoc {
+		fmt.Fprintf(&userPrompt, "Location: %s (%s, population %d/%d)\n", loc.Name, loc.Region, loc.Population, loc.PopulationCap)
+	}
+	season := SeasonFromTick(w.Tick)
+	timeDesc := TimeOfDayFromTick(w.Tick)
+	fmt.Fprintf(&userPrompt, "Time: %s, %s\n", timeDesc, season)
+
+	// Wealth
+	fmt.Fprintf(&userPrompt, "\nCoin: %d\n", coin)
+	if len(inventory) > 0 {
+		items := make([]string, 0, len(inventory))
+		for name, it := range inventory {
+			if it.Count > 1 {
+				items = append(items, fmt.Sprintf("%d %s", it.Count, name))
+			} else {
+				items = append(items, fmt.Sprintf("a %s", name))
+			}
+		}
+		fmt.Fprintf(&userPrompt, "Carrying: %s\n", strings.Join(items, ", "))
+	}
+
+	// Family
+	if player.SpouseID != "" {
+		if spouse, ok := w.People[player.SpouseID]; ok {
+			status := "alive"
+			if !spouse.Alive {
+				status = "deceased"
+			}
+			fmt.Fprintf(&userPrompt, "\nSpouse: %s (%s)\n", spouse.Name, status)
+		}
+	}
+	if player.FatherID != "" {
+		if father, ok := w.People[player.FatherID]; ok {
+			status := "alive"
+			if !father.Alive {
+				status = "deceased"
+			}
+			fmt.Fprintf(&userPrompt, "Father: %s (%s)\n", father.Name, status)
+		}
+	}
+	if player.MotherID != "" {
+		if mother, ok := w.People[player.MotherID]; ok {
+			status := "alive"
+			if !mother.Alive {
+				status = "deceased"
+			}
+			fmt.Fprintf(&userPrompt, "Mother: %s (%s)\n", mother.Name, status)
+		}
+	}
+
+	// Recent memories
+	var recent []string
+	for _, mem := range w.Memories {
+		if mem.OwnerID == player.ID && mem.Importance > 0.2 {
+			recent = append(recent, mem.Description)
+		}
+	}
+	if len(recent) > 5 {
+		recent = recent[len(recent)-5:]
+	}
+	if len(recent) > 0 {
+		userPrompt.WriteString("\nRecent experiences:\n")
+		for _, r := range recent {
+			fmt.Fprintf(&userPrompt, "  - %s\n", r)
+		}
+	}
+
+	// Relationships
+	var relationships []string
+	for _, r := range w.Relationships {
+		if r.FromID == player.ID {
+			if other, ok := w.People[r.ToID]; ok && other.Alive {
+				relationships = append(relationships, fmt.Sprintf("%s (%s)", other.Name, RelationshipSummary(r)))
+			}
+		}
+	}
+	if len(relationships) > 5 {
+		relationships = relationships[:5]
+	}
+	if len(relationships) > 0 {
+		fmt.Fprintf(&userPrompt, "\nPeople you know: %s\n", strings.Join(relationships, ", "))
+	}
+
+	messages := []llm.ChatMessage{
+		{Role: "system", Content: sysPrompt},
+		{Role: "user", Content: userPrompt.String()},
+	}
+	return n.llm.Chat(ctx, messages)
+}
+
+// statusTemplate is the narrative template fallback for status.
+// It reads like a character's inner monologue — not a data dump.
+func (n *Narrator) statusTemplate(w *core.World, player *core.Person, loc *core.Location, hasLoc bool, coin int, inventory map[string]core.Item) string {
+	var b strings.Builder
+	season := SeasonFromTick(w.Tick)
+	timeDesc := TimeOfDayFromTick(w.Tick)
+	age := player.AgeAt(w.Tick)
+
+	// Opening — a moment of reflection
+	locName := "the open frontier"
+	if hasLoc {
+		locName = loc.Name
+	}
+	fmt.Fprintf(&b, "You pause in %s as the %s light of %s settles over the land. ", locName, timeDesc, season)
+
+	// Identity — woven into the prose
+	if player.Occupation != "" {
+		fmt.Fprintf(&b, "You are %s, %d years old, a %s of %s class. ", player.Name, age, player.Occupation, player.Class)
+	} else {
+		fmt.Fprintf(&b, "You are %s, %d years old, of %s class. ", player.Name, age, player.Class)
+	}
+
+	// Wealth — sensory
+	if coin > 0 {
+		if coin > 50 {
+			fmt.Fprintf(&b, "Your purse is comfortably heavy with %d coin — enough for now. ", coin)
+		} else if coin > 10 {
+			fmt.Fprintf(&b, "You feel the weight of %d coin in your purse — not much, but enough to get by. ", coin)
+		} else {
+			fmt.Fprintf(&b, "Your purse is light — only %d coin rattles at your hip. ", coin)
+		}
+	} else {
+		b.WriteString("Your purse is empty, and the absence of its weight is a constant reminder. ")
+	}
+
+	// Inventory
+	if len(inventory) > 0 {
+		items := make([]string, 0, len(inventory))
+		for name, it := range inventory {
+			if it.Count > 1 {
+				items = append(items, fmt.Sprintf("%d %s", it.Count, name))
+			} else {
+				items = append(items, fmt.Sprintf("a %s", name))
+			}
+		}
+		b.WriteString(fmt.Sprintf("In your pack you carry %s. ", strings.Join(items, ", ")))
+	} else {
+		b.WriteString("Your pack is empty. ")
+	}
+
+	// Family
+	if player.SpouseID != "" {
+		if spouse, ok := w.People[player.SpouseID]; ok {
+			if spouse.Alive {
+				fmt.Fprintf(&b, "Your thoughts turn to %s, your spouse — you carry the warmth of that bond. ", spouse.Name)
+			} else {
+				fmt.Fprintf(&b, "Your thoughts drift to %s, your late spouse — a loss that still stings. ", spouse.Name)
+			}
+		}
+	}
+	if player.FatherID != "" || player.MotherID != "" {
+		var family []string
+		if father, ok := w.People[player.FatherID]; ok && player.FatherID != "" {
+			if father.Alive {
+				family = append(family, fmt.Sprintf("your father %s still draws breath", father.Name))
+			} else {
+				family = append(family, fmt.Sprintf("your father %s rests with the ancestors", father.Name))
+			}
+		}
+		if mother, ok := w.People[player.MotherID]; ok && player.MotherID != "" {
+			if mother.Alive {
+				family = append(family, fmt.Sprintf("your mother %s lives on", mother.Name))
+			} else {
+				family = append(family, fmt.Sprintf("your mother %s has passed beyond the veil", mother.Name))
+			}
+		}
+		if len(family) > 0 {
+			fmt.Fprintf(&b, "You are grateful that %s. ", strings.Join(family, " and "))
+		}
+	}
+
+	// Recent memories
+	var recent []string
+	for _, mem := range w.Memories {
+		if mem.OwnerID == player.ID && mem.Importance > 0.2 {
+			recent = append(recent, mem.Description)
+		}
+	}
+	if len(recent) > 0 {
+		limit := 3
+		if len(recent) < limit {
+			limit = len(recent)
+		}
+		last := recent[len(recent)-limit:]
+		b.WriteString(fmt.Sprintf("Your mind wanders to recent days — %s. ", strings.Join(last, ", ")))
+	}
+
+	// Closing
+	if hasLoc {
+		people := w.LivingPeopleAt(loc.ID)
+		others := 0
+		for _, p := range people {
+			if p.ID != player.ID {
+				others++
+			}
+		}
+		if others > 0 {
+			fmt.Fprintf(&b, "The sounds of %d others fill %s around you.", others, loc.Name)
+		} else {
+			fmt.Fprintf(&b, "%s is quiet, and you are alone with your thoughts.", loc.Name)
+		}
+	} else {
+		b.WriteString("The frontier stretches on, vast and indifferent.")
+	}
+
+	return b.String()
+}

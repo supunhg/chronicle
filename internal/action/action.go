@@ -643,106 +643,30 @@ func (e *Engine) resolvePray() Result {
 	return Result{OK: true, Text: fmt.Sprintf("You bow your head in prayer in %s. The world is quiet for a moment, and you feel a sense of calm.", loc.Name)}
 }
 
-// resolveStatus handles "status" — an immersive character journal.
-// Describes the player's situation as a narrative, not a data dump.
+// resolveStatus handles "status" — an immersive narrative moment of
+// introspection. Delegates to the narrator for LLM-first prose that
+// reads like a character's inner monologue, with a rich template
+// fallback that paints a picture rather than dumping data.
 func (e *Engine) resolveStatus() Result {
 	player := e.player()
 	if player == nil {
-		return Result{OK: true, Text: "You are an observer, unbound to any mortal form."}
+		return Result{OK: true, Text: "You pause, but cannot recall who you are. The frontier has a way of erasing identities."}
 	}
-	var b strings.Builder
 
-	loc := "an unknown place"
+	if e.narrator != nil {
+		text := e.narrator.DescribeStatus(context.Background(), e.world)
+		return Result{OK: true, Text: text}
+	}
+
+	// Minimal fallback when narrator is nil
+	loc := "the open frontier"
 	if l, ok := e.world.Locations[player.LocationID]; ok {
 		loc = l.Name
 	}
 	season := narrator.SeasonFromTick(e.world.Tick)
 	timeDesc := narrator.TimeOfDayFromTick(e.world.Tick)
-	gender := "Male"
-	if player.Gender == "F" {
-		gender = "Female"
-	}
-
-	// Narrative opening
-	fmt.Fprintf(&b, "\nYou pause and take stock of your situation.\n\n")
-	fmt.Fprintf(&b, "You are %s, a %s of %s class, %d years of age.", player.Name, strings.ToLower(gender), player.Class, player.AgeAt(e.world.Tick))
-	if player.Occupation != "" {
-		fmt.Fprintf(&b, " By trade, you are a %s.", player.Occupation)
-	}
-	fmt.Fprintf(&b, " You find yourself in %s on this %s %s.\n\n", loc, strings.ToLower(timeDesc), strings.ToLower(season))
-
-	// Wealth — narrative
-	if e.world.Coin > 0 {
-		fmt.Fprintf(&b, "You carry %d coin", e.world.Coin)
-	} else {
-		b.WriteString("Your purse is empty")
-	}
-	if len(e.world.Inventory) > 0 {
-		b.WriteString(", along with ")
-		items := make([]string, 0, len(e.world.Inventory))
-		for name, it := range e.world.Inventory {
-			if it.Count > 1 {
-				items = append(items, fmt.Sprintf("%d %s", it.Count, name))
-			} else {
-				items = append(items, fmt.Sprintf("a %s", name))
-			}
-		}
-		b.WriteString(strings.Join(items, ", "))
-	}
-	b.WriteString(".\n\n")
-
-	// Family — narrative
-	hasFamily := false
-	if player.SpouseID != "" {
-		if spouse, ok := e.world.People[player.SpouseID]; ok {
-			fmt.Fprintf(&b, "You are married to %s.", spouse.Name)
-			hasFamily = true
-		}
-	}
-	if player.FatherID != "" {
-		if father, ok := e.world.People[player.FatherID]; ok {
-			if !father.Alive {
-				fmt.Fprintf(&b, " Your father, %s, has passed.", father.Name)
-			} else {
-				fmt.Fprintf(&b, " Your father %s is alive.", father.Name)
-			}
-			hasFamily = true
-		}
-	}
-	if player.MotherID != "" {
-		if mother, ok := e.world.People[player.MotherID]; ok {
-			if !mother.Alive {
-				fmt.Fprintf(&b, " Your mother, %s, has passed.", mother.Name)
-			} else {
-				fmt.Fprintf(&b, " Your mother %s is alive.", mother.Name)
-			}
-			hasFamily = true
-		}
-	}
-	if hasFamily {
-		b.WriteString("\n\n")
-	}
-
-	// Recent memories — narrative
-	var recentMemories []core.Memory
-	for _, mem := range e.world.Memories {
-		if mem.OwnerID == player.ID && mem.Importance > 0.2 {
-			recentMemories = append(recentMemories, mem)
-		}
-	}
-	if len(recentMemories) > 0 {
-		b.WriteString("You think back on recent events:\n")
-		limit := 5
-		if len(recentMemories) < limit {
-			limit = len(recentMemories)
-		}
-		for _, mem := range recentMemories[len(recentMemories)-limit:] {
-			fmt.Fprintf(&b, "  - %s\n", mem.Description)
-		}
-	}
-
-	b.WriteString("\n")
-	return Result{OK: true, Text: b.String()}
+	return Result{OK: true, Text: fmt.Sprintf("You pause in %s. It is %s, %s. You are %s, a %d-year-old %s.",
+		loc, timeDesc, season, player.Name, player.AgeAt(e.world.Tick), player.Occupation)}
 }
 
 // resolveListen handles "listen" — the player pauses to listen to
