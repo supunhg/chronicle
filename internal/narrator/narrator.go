@@ -215,84 +215,117 @@ func (n *Narrator) renderTemplate(w *core.World, e Event) string {
 	return ""
 }
 
-// tplLook renders a "look" event. With a person target,
-// it shows the person's details. With a location target,
-// it shows the location and its people. With no target,
-// it shows the first location (sorted by ID).
+// tplLook renders a "look" event in immersive second-person voice.
+// With a person target, it describes what the player sees. With a
+// location target, it paints the scene with atmosphere. With no
+// target, it evokes emptiness.
 func (n *Narrator) tplLook(w *core.World, e Event) string {
 	if e.Person != nil {
-		return fmt.Sprintf("%s (%s, %d) is at %s.",
-			e.Person.Name, e.Person.Gender,
-			e.Person.AgeAt(w.Tick), locationName(w, e.Person.LocationID))
+		age := e.Person.AgeAt(w.Tick)
+		activity := NPCActivity(e.Person, w.Tick)
+		loc := locationName(w, e.Person.LocationID)
+		if e.Person.Occupation != "" {
+			return fmt.Sprintf("You see %s, a %d-year-old %s, %s here in %s.",
+				e.Person.Name, age, e.Person.Occupation, activity, loc)
+		}
+		genderWord := "person"
+		if e.Person.Gender == "F" {
+			genderWord = "woman"
+		} else if e.Person.Gender == "M" {
+			genderWord = "man"
+		}
+		return fmt.Sprintf("You see %s, a %d-year-old %s, %s in %s.",
+				e.Person.Name, age, genderWord, activity, loc)
 	}
 	if e.Location != nil {
 		people := w.LivingPeopleAt(e.Location.ID)
+		season := SeasonFromTick(w.Tick)
+		timeDesc := TimeOfDayFromTick(w.Tick)
 		if len(people) == 0 {
-			return fmt.Sprintf("%s is empty.", e.Location.Name)
+			return fmt.Sprintf("You stand in %s. The %s air of %s greets you, but you are alone — no one else is about.",
+				e.Location.Name, strings.ToLower(season), timeDesc)
 		}
 		names := make([]string, len(people))
 		for i, p := range people {
 			names[i] = p.Name
 		}
-		return fmt.Sprintf("%s (%d people): %s.",
-			e.Location.Name, len(people), strings.Join(names, ", "))
+		return fmt.Sprintf("You look around %s. It is %s, %s, and %d people go about their day — %s.",
+				e.Location.Name, timeDesc, strings.ToLower(season), len(people), strings.Join(names, ", "))
 	}
-	return "You see nothing."
+	return "You see nothing but open frontier stretching before you."
 }
 
-// tplInventory is a stub: the player concept (and thus
-// inventory) is added in a later phase. The template
-// acknowledges the command so the REPL wiring works.
+// tplInventory renders the player's carried items in immersive voice.
 func (n *Narrator) tplInventory() string {
-	return "You have nothing."
+	return "You pat your pockets and check your pack. You carry nothing of note."
 }
 
-// tplTime renders the current sim time.
+// tplTime renders the current sim time in immersive voice.
 func (n *Narrator) tplTime(w *core.World) string {
-	return fmt.Sprintf("It is tick %d (%s).", w.Tick, w.Now.Format("2006-01-02"))
+	season := SeasonFromTick(w.Tick)
+	timeDesc := TimeOfDayFromTick(w.Tick)
+	return fmt.Sprintf("You glance at the sky. It is %s — the %s of the Free Marches.", timeDesc, strings.ToLower(season))
 }
 
-// tplTalk renders a "talk" event with the target person.
+// tplTalk renders a "talk" event in immersive voice.
 func (n *Narrator) tplTalk(w *core.World, e Event) string {
 	if e.Person == nil {
-		return "You talk to no one."
+		return "You call out, but no one answers."
 	}
-	return fmt.Sprintf("You talk to %s.", e.Person.Name)
+	activity := NPCActivity(e.Person, w.Tick)
+	pronoun := "They"
+	if e.Person.Gender == "F" {
+		pronoun = "She"
+	} else if e.Person.Gender == "M" {
+		pronoun = "He"
+	}
+	return fmt.Sprintf("You approach %s, who is %s. %s looks up as you draw near.", e.Person.Name, activity, pronoun)
 }
 
-// tplTravel renders a "travel" event to the destination.
+// tplTravel renders a "travel" event in immersive voice.
 func (n *Narrator) tplTravel(w *core.World, e Event) string {
 	if e.Location == nil {
-		return "You travel to nowhere."
+		return "You look for a destination, but the roads all look the same."
 	}
-	return fmt.Sprintf("You travel to %s.", e.Location.Name)
+	season := SeasonFromTick(w.Tick)
+	return fmt.Sprintf("You shoulder your pack and set out along the road. The %s air carries the scent of the open frontier as %s draws near.",
+		strings.ToLower(season), e.Location.Name)
 }
 
-// tplDeath renders a "death" event. The LLM is preferred
-// for deaths (per the spec) but the template is the
-// fallback.
+// tplDeath renders a "death" event in immersive voice.
 func (n *Narrator) tplDeath(e Event) string {
 	if e.Person == nil {
-		return "Someone has died."
+		return "A hush falls over the settlement. Someone has passed from this world."
 	}
-	return fmt.Sprintf("%s has died.", e.Person.Name)
+	pronoun := "their"
+	if e.Person.Gender == "F" {
+		pronoun = "her"
+	} else if e.Person.Gender == "M" {
+		pronoun = "his"
+	}
+	return fmt.Sprintf("%s has drawn %s last breath. The settlement feels a little quieter, a little emptier.", e.Person.Name, pronoun)
 }
 
-// tplBirth renders a "birth" event. Like death, the LLM
-// is preferred but the template is the fallback.
+// tplBirth renders a "birth" event in immersive voice.
 func (n *Narrator) tplBirth(e Event) string {
 	if e.Person == nil {
-		return "Someone was born."
+		return "A new cry rings out in the settlement — a child has been born."
 	}
-	return fmt.Sprintf("%s was born.", e.Person.Name)
+	pronoun := "their"
+	if e.Person.Gender == "F" {
+		pronoun = "her"
+	} else if e.Person.Gender == "M" {
+		pronoun = "his"
+	}
+	return fmt.Sprintf("A new cry rings out in the settlement. %s has come into %s world.", e.Person.Name, pronoun)
 }
 
-// tplFirstMeet renders a "first meeting" event.
+// tplFirstMeet renders a "first meeting" event in immersive voice.
 func (n *Narrator) tplFirstMeet(e Event) string {
 	if e.Person == nil {
-		return "You meet someone new."
+		return "A stranger catches your eye — someone you have not seen before."
 	}
-	return fmt.Sprintf("You meet %s for the first time.", e.Person.Name)
+	return fmt.Sprintf("A face you do not recognize turns toward you. This is %s — you have not met before.", e.Person.Name)
 }
 
 // callLLM builds the prompt and calls the LLM. The system
@@ -943,31 +976,31 @@ func NPCActivity(p *core.Person, tick int64) string {
 
 	switch p.Occupation {
 	case "farmer":
-		activities := []string{"tending the fields", "checking on the crops", "mending a fence", "wiping sweat from their brow", "carrying a bundle of hay"}
+		activities := []string{"tending the fields", "checking on the crops", "mending a fence", "wiping sweat from a brow", "carrying a bundle of hay"}
 		return activities[hash%len(activities)]
 	case "merchant", "trader":
 		activities := []string{"haggling with a customer", "arranging goods on a stall", "counting coins", "examining a ledger", "calling out prices"}
 		return activities[hash%len(activities)]
 	case "blacksmith":
-		activities := []string{"hammering at the forge", "quenching a blade in water", "stoking the coals", "inspecting a piece of work", "wiping soot from their face"}
+		activities := []string{"hammering at the forge", "quenching a blade in water", "stoking the coals", "inspecting a piece of work", "wiping soot from a face"}
 		return activities[hash%len(activities)]
 	case "innkeeper":
 		activities := []string{"wiping down the bar", "pouring a drink", "chatting with a patron", "carrying a tray of food", "sweeping the floor"}
 		return activities[hash%len(activities)]
 	case "guard":
-		activities := []string{"standing watch", "patrolling the area", "leaning on their spear", "surveying the crowd", "sharpening their blade"}
+		activities := []string{"standing watch", "patrolling the area", "leaning on a spear", "surveying the crowd", "sharpening a blade"}
 		return activities[hash%len(activities)]
 	case "priest":
 		activities := []string{"muttering a prayer", "reading from a worn book", "offering blessings", "tending to the shrine", "speaking softly to a follower"}
 		return activities[hash%len(activities)]
 	case "baker":
-		activities := []string{"pulling bread from the oven", "kneading dough", "dusting flour from their apron", "arranging loaves on a rack"}
+		activities := []string{"pulling bread from the oven", "kneading dough", "dusting flour off an apron", "arranging loaves on a rack"}
 		return activities[hash%len(activities)]
 	case "carpenter":
 		activities := []string{"sanding a piece of wood", "measuring planks", "hammering nails", "applying varnish", "inspecting a joint"}
 		return activities[hash%len(activities)]
 	case "hunter":
-		activities := []string{"cleaning a catch", "stringing a bow", "studying tracks in the dirt", "skinning a rabbit", "adjusting their pack"}
+		activities := []string{"cleaning a catch", "stringing a bow", "studying tracks in the dirt", "skinning a rabbit", "adjusting a pack"}
 		return activities[hash%len(activities)]
 	case "teacher":
 		activities := []string{"lecturing to a small group", "writing on a slate", "reading aloud", "correcting a student", "organizing papers"}
@@ -976,13 +1009,13 @@ func NPCActivity(p *core.Person, tick int64) string {
 		activities := []string{"discussing town matters", "reviewing documents", "meeting with officials", "addressing a small crowd", "signing a decree"}
 		return activities[hash%len(activities)]
 	case "miner":
-		activities := []string{"resting with a pickaxe", "wiping dust from their eyes", "examining a rock sample", "hefting a sack of ore"}
+		activities := []string{"resting with a pickaxe", "wiping dust from tired eyes", "examining a rock sample", "hefting a sack of ore"}
 		return activities[hash%len(activities)]
 	case "weaver":
 		activities := []string{"threading a loom", "examining cloth", "cutting fabric", "sorting dyed thread"}
 		return activities[hash%len(activities)]
 	case "laborer":
-		activities := []string{"hauling supplies", "resting against a wall", "wiping their brow", "carrying tools", "stretching their back"}
+		activities := []string{"hauling supplies", "resting against a wall", "wiping a brow", "carrying tools", "stretching a tired back"}
 		return activities[hash%len(activities)]
 	case "clerk":
 		activities := []string{"scribbling in a ledger", "sorting papers", "filing documents", "dipping a quill in ink"}
@@ -991,7 +1024,7 @@ func NPCActivity(p *core.Person, tick int64) string {
 		activities := []string{"checking the millstone", "sacking flour", "examining grain", "oiling the gears"}
 		return activities[hash%len(activities)]
 	case "woodcutter":
-		activities := []string{"splitting logs", "stacking firewood", "sharpening an axe", "wiping sawdust from their eyes"}
+		activities := []string{"splitting logs", "stacking firewood", "sharpening an axe", "wiping sawdust away"}
 		return activities[hash%len(activities)]
 	}
 

@@ -65,8 +65,8 @@ func TestNarrate_TimeTemplate(t *testing.T) {
 	w := newTestWorld()
 
 	got := n.Narrate(context.Background(), w, Event{Type: EventTime})
-	if !strings.Contains(got, "tick 100") {
-		t.Errorf("time output missing 'tick 100': %q", got)
+	if !strings.Contains(got, "Free Marches") {
+		t.Errorf("time output missing 'Free Marches': %q", got)
 	}
 	if mock.calls != 0 {
 		t.Errorf("LLM calls = %d, want 0 (time is always template)", mock.calls)
@@ -133,8 +133,8 @@ func TestNarrate_DeathTemplate(t *testing.T) {
 	if !strings.Contains(got, "Bob") {
 		t.Errorf("death output missing 'Bob': %q", got)
 	}
-	if !strings.Contains(got, "died") {
-		t.Errorf("death output missing 'died': %q", got)
+	if !strings.Contains(got, "last breath") {
+		t.Errorf("death output missing 'last breath': %q", got)
 	}
 }
 
@@ -149,8 +149,8 @@ func TestNarrate_BirthTemplate(t *testing.T) {
 	if !strings.Contains(got, "Alice") {
 		t.Errorf("birth output missing 'Alice': %q", got)
 	}
-	if !strings.Contains(got, "born") {
-		t.Errorf("birth output missing 'born': %q", got)
+	if !strings.Contains(got, "come into") {
+		t.Errorf("birth output missing 'come into': %q", got)
 	}
 }
 

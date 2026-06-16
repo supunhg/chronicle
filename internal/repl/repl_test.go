@@ -457,7 +457,7 @@ func TestREPL_TravelWithNarrator(t *testing.T) {
 	nar := narrator.New(mock, 4)
 	act := action.New(w, nar)
 	out := runREPL(t, w, "travel ashford\nquit\n", Options{Narrator: nar, Action: act})
-	if !strings.Contains(out, "You travel to Ashford") {
+	if !strings.Contains(out, "Ashford") || !strings.Contains(out, "set out") {
 		t.Errorf("output missing narrator template text: %q", out)
 	}
 	// Travel is routine — LLM should NOT be called.
@@ -475,8 +475,8 @@ func TestREPL_TalkWithNarrator_Fallback(t *testing.T) {
 	nar := narrator.New(mock, 4)
 	act := action.New(w, nar)
 	out := runREPL(t, w, "talk alice\nquit\n", Options{Narrator: nar, Action: act})
-	// Template fallback: "You talk to Alice."
-	if !strings.Contains(out, "You talk to Alice") {
+	// Template fallback: "You approach Alice, who is ..."
+	if !strings.Contains(out, "approach") || !strings.Contains(out, "Alice") {
 		t.Errorf("output missing template fallback text: %q", out)
 	}
 }
