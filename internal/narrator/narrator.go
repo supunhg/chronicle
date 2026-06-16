@@ -228,14 +228,8 @@ func (n *Narrator) tplLook(w *core.World, e Event) string {
 			return fmt.Sprintf("You see %s, a %d-year-old %s, %s here in %s.",
 				e.Person.Name, age, e.Person.Occupation, activity, loc)
 		}
-		genderWord := "person"
-		if e.Person.Gender == "F" {
-			genderWord = "woman"
-		} else if e.Person.Gender == "M" {
-			genderWord = "man"
-		}
 		return fmt.Sprintf("You see %s, a %d-year-old %s, %s in %s.",
-				e.Person.Name, age, genderWord, activity, loc)
+				e.Person.Name, age, genderNoun(e.Person.Gender), activity, loc)
 	}
 	if e.Location != nil {
 		people := w.LivingPeopleAt(e.Location.ID)
@@ -273,13 +267,7 @@ func (n *Narrator) tplTalk(w *core.World, e Event) string {
 		return "You call out, but no one answers."
 	}
 	activity := NPCActivity(e.Person, w.Tick)
-	pronoun := "They"
-	if e.Person.Gender == "F" {
-		pronoun = "She"
-	} else if e.Person.Gender == "M" {
-		pronoun = "He"
-	}
-	return fmt.Sprintf("You approach %s, who is %s. %s looks up as you draw near.", e.Person.Name, activity, pronoun)
+	return fmt.Sprintf("You approach %s, who is %s. %s looks up as you draw near.", e.Person.Name, activity, pronounSubject(e.Person.Gender))
 }
 
 // tplTravel renders a "travel" event in immersive voice.
@@ -297,13 +285,7 @@ func (n *Narrator) tplDeath(e Event) string {
 	if e.Person == nil {
 		return "A hush falls over the settlement. Someone has passed from this world."
 	}
-	pronoun := "their"
-	if e.Person.Gender == "F" {
-		pronoun = "her"
-	} else if e.Person.Gender == "M" {
-		pronoun = "his"
-	}
-	return fmt.Sprintf("%s has drawn %s last breath. The settlement feels a little quieter, a little emptier.", e.Person.Name, pronoun)
+	return fmt.Sprintf("%s has drawn %s last breath. The settlement feels a little quieter, a little emptier.", e.Person.Name, pronounPossessive(e.Person.Gender))
 }
 
 // tplBirth renders a "birth" event in immersive voice.
@@ -311,13 +293,7 @@ func (n *Narrator) tplBirth(e Event) string {
 	if e.Person == nil {
 		return "A new cry rings out in the settlement — a child has been born."
 	}
-	pronoun := "their"
-	if e.Person.Gender == "F" {
-		pronoun = "her"
-	} else if e.Person.Gender == "M" {
-		pronoun = "his"
-	}
-	return fmt.Sprintf("A new cry rings out in the settlement. %s has come into %s world.", e.Person.Name, pronoun)
+	return fmt.Sprintf("A new cry rings out in the settlement. %s has come into %s world.", e.Person.Name, pronounPossessive(e.Person.Gender))
 }
 
 // tplFirstMeet renders a "first meeting" event in immersive voice.
@@ -935,6 +911,48 @@ func capitalizeFirst(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// pronounSubject returns the subject pronoun for a gender: "He", "She",
+// or "They" (neutral default). Used in templates where the NPC is the
+// subject of a sentence ("He looks up", "She turns toward you").
+func pronounSubject(gender string) string {
+	switch gender {
+	case "F":
+		return "She"
+	case "M":
+		return "He"
+	default:
+		return "They"
+	}
+}
+
+// pronounPossessive returns the possessive pronoun for a gender: "his",
+// "her", or "their" (neutral default). Used in templates where the NPC
+// owns something ("his last breath", "her world").
+func pronounPossessive(gender string) string {
+	switch gender {
+	case "F":
+		return "her"
+	case "M":
+		return "his"
+	default:
+		return "their"
+	}
+}
+
+// genderNoun returns a noun for a gender: "woman", "man", or "person"
+// (neutral default). Used in templates describing someone's identity
+// ("a 32-year-old woman").
+func genderNoun(gender string) string {
+	switch gender {
+	case "F":
+		return "woman"
+	case "M":
+		return "man"
+	default:
+		return "person"
+	}
 }
 
 // DescribeJourney generates an atmospheric travel narrative.
