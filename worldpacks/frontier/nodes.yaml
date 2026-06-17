@@ -1,0 +1,305 @@
+# Chronicle v2 — frontier worldpack: nodes
+#
+# Phase 38.A authoring. 14 nodes total:
+#   - 4 protagonist openings (each is that protagonist's first
+#     exclusive_node; routes to the shared act1.ashwick_entrance)
+#   - 1 shared Act 1 opening: act1.ashwick_entrance (verbatim
+#     from docs/story-node-yaml.md §3 canonical fixture so
+#     TestLoadStoryNodes_CanonicalExample still binds)
+#   - 5 downstream continuation nodes (wait_at_square,
+#     greyhall_keep, eastern_ridge, keeper_interview,
+#     void_dragon_reveal, ally_appears_intro)
+#   - 4 deep exclusive scenes (one per protagonist; flagged by
+#     the protagonist's starting_flags — currently unreachable
+#     from the limited Act 1 we author here; reachability lands
+#     in Phase 38.C + §38.E's TestAllEndingsReachable gate)
+
+nodes:
+
+  # ---------- 4 protagonist openings (each is exclusive) ----------
+
+  - id: "kael.fringe_searching"
+    title: "Prologue I — Kael on the fringe"
+    text: |
+      You scan the barren slope where your order's keep once
+      stood. The wind has scoured the stones clean of the
+      inscription that marked them — but you were there the day
+      it was raised, and you were there the day it fell. Smoke
+      still rises from the lower valleys below. You have a sword
+      on your hip, a half-remembered oath on your tongue, and no
+      particular reason to keep either.
+    choices:
+      - id: "continue_to_ashwick"
+        text: "Continue south, toward Ashwick."
+        next_node_id: "act1.ashwick_entrance"
+        effects:
+          - set_flag: "began_journey"
+          - set_flag: "Kael_at_fringe"
+
+  - id: "lyra.runesmith_workshop"
+    title: "Prologue II — Lyra at the workshop"
+    text: |
+      The chisel cuts a precise arc into the slate. You steady
+      your hand and turn the slate at the angle your grandmother
+      taught you; the rune forms, holds its shape for two breaths,
+      then fades. As it always does. Your worktable is stacked
+      with half-finished slates, the floor is scattered with
+      filings, and the door has a brand-new lock you put on the
+      second your banishment notice arrived. The sign outside
+      still says "Lyra — commissions taken". You turn the slate
+      again.
+    choices:
+      - id: "continue_to_ashwick"
+        text: "Lay the chisel down. Head for Ashwick."
+        next_node_id: "act1.ashwick_entrance"
+        effects:
+          - set_flag: "began_journey"
+          - set_flag: "Lyra_at_workshop"
+
+  - id: "raven.disgraced_inn"
+    title: "Prologue III — Raven in hiding"
+    text: |
+      The inn's common room is half-empty and the other half
+      does not know you. That is precisely how you have arranged
+      it — three cities in, you have stopped using your name,
+      stopped using your title, and stopped wearing the signet
+      ring that has hung on a leather cord beneath your shirt
+      since the night your aunt's men came for you. Tonight you
+      sleep in the back room; tomorrow you take the road to
+      Ashwick, where there's said to be work for anyone willing
+      to ask.
+    choices:
+      - id: "continue_to_ashwick"
+        text: "Slip out before dawn. Head for Ashwick."
+        next_node_id: "act1.ashwick_entrance"
+        effects:
+          - set_flag: "began_journey"
+          - set_flag: "Raven_at_inn"
+
+  - id: "aria.dawn_temple"
+    title: "Prologue IV — Aria at the temple"
+    text: |
+      First light crosses the temple floor in three long shafts.
+      You kneel at the third, as the novices do, as you have
+      done since the morning they found you on the road and
+      Father Holt put a cup of water in your hand. He is dead
+      now. The order is older than he was, and the roads between
+      here and Ashwick are not safe, and the elders have asked
+      you twice whether you might carry a message for the
+      cathedral there. You tell them, yes. You tell them, at
+      first light.
+    choices:
+      - id: "continue_to_ashwick"
+        text: "Take the road before the next bell. Head for Ashwick."
+        next_node_id: "act1.ashwick_entrance"
+        effects:
+          - set_flag: "began_journey"
+          - set_flag: "Aria_at_temple"
+
+  # ---------- 1 shared Act 1 opening (canonical fixture) ----------
+
+  - id: "act1.ashwick_entrance"
+    title: "EX01 — The frontier town of Ashwick"
+    text: |
+      You stand at the threshold of Greyhall Keep. The wind
+      carries the smell of woodsmoke and something older —
+      incense, or the memory of incense, from the ruins on
+      the eastern ridge.
+    choices:
+      - id: "enter_keep"
+        text: "Enter the keep."
+        next_node_id: "act1.greyhall_keep"
+        effects:
+          - set_flag: "entered_keep"
+      - id: "head_east"
+        text: "Head for the eastern ridge."
+        next_node_id: "act1.eastern_ridge"
+        conditions:
+          - variable: { key: "Courage", value: 30 }
+      - id: "wait_watch"
+        text: "Wait in the square and watch."
+        next_node_id: "act1.wait_at_square"
+
+  # ---------- 5 downstream continuation nodes ----------
+
+  - id: "act1.wait_at_square"
+    title: "EX01a — Waiting at the square"
+    text: |
+      You lean against the well. People pass; the sun moves;
+      nothing happens, which is itself a kind of information.
+      The eastern ridge is half in cloud, the keep gate has a
+      fresh hinge oil in it, and someone has tied a red cloth to
+      the post by the well that may or may not mean what it
+      would have meant forty years ago.
+    choices:
+      - id: "enter_after_wait"
+        text: "Stand up. Cross to the keep."
+        next_node_id: "act1.greyhall_keep"
+
+  - id: "act1.greyhall_keep"
+    title: "EX02 — Inside Greyhall Keep"
+    text: |
+      The hall is quieter than it should be. The fire has burned
+      down to ash and memory; the chairs are set as if for a
+      meeting that no one came to. At the back, behind a table,
+      a woman in a sun-faded coat looks up at you with the
+      patient attention of someone who has been waiting days.
+    choices:
+      - id: "speak_to_keeper"
+        text: "Speak to the keeper."
+        next_node_id: "act1.keeper_interview"
+        effects:
+          - set_flag: "began_journey"
+          - trigger_event: "ally_call"
+      - id: "step_back_out"
+        text: "Step back out."
+        next_node_id: "act1.ashwick_entrance"
+
+  - id: "act1.eastern_ridge"
+    title: "EX03 — The Eastern Ridge"
+    text: |
+      Old ruins stretch along the ridge. The carved pillars lean
+      into the wind like tired old men; a half-buried mosaic
+      shows a constellation no longer on any cartographer's chart.
+      The wind is colder up here than it had any right to be.
+    choices:
+      - id: "investigate_ruins"
+        text: "Investigate the ruins."
+        next_node_id: "act1.void_dragon_reveal"
+        effects:
+          - modify_variable: { key: "Courage", value: 60 }
+          - trigger_event: "dragon_stirs"
+      - id: "return_to_keep"
+        text: "Head back down to the keep."
+        next_node_id: "act1.greyhall_keep"
+
+  - id: "act1.keeper_interview"
+    title: "EX04 — The keeper speaks"
+    text: |
+      She pours you water; she does not pour it into a cup. "They
+      took the southern road last night," she says. "Four. Maybe
+      five." She has not asked your name — and you realise she
+      does not need to. She has been expecting someone to walk
+      through the keep's door for weeks.
+    choices:
+      - id: "offer_help"
+        text: "Offer to help."
+        next_node_id: "act1.ally_appears_intro"
+        effects:
+          - set_flag: "accepted_commission"
+          - modify_reputation: { faction: "kingdom", value: 5 }
+      - id: "decline"
+        text: "Decline. Return to the square."
+        next_node_id: "act1.ashwick_entrance"
+
+  - id: "act1.void_dragon_reveal"
+    title: "EX05 — The void dragon reveal"
+    text: |
+      The relief at the base of the eastern pillar is not the
+      constellation you thought. It is a serpent, coiled, the
+      size of a cathedral, and as you look at it the air above
+      the ridges darkens — not a cloud, not a shadow, but a
+      void-shape with the slow movement of something waking.
+      Whatever is in the inner chamber is older than the keep.
+      Older than the kingdom. Older, you suspect, than the
+      language you are thinking in.
+    choices:
+      - id: "flee_back"
+        text: "Flee back toward the keep."
+        next_node_id: "act1.greyhall_keep"
+        effects:
+          - set_flag: "saw_void_dragon"
+
+  - id: "act1.ally_appears_intro"
+    title: "EX06 — An old friend, by chance"
+    text: |
+      A ranger — bow over shoulder, dirt under her nails —
+      drops out of the trees with the easy confidence of someone
+      who has been following you for at least an hour. "The
+      keeper sent word," she says. "I am to walk with you as far
+      as the southern road and possibly beyond." She introduces
+      herself as Elara, and you remember that name from
+      somewhere — the eastern ridge, perhaps, or a tavern in
+      another town, or a story your grandmother told you once.
+    choices:
+      - id: "accept_elara"
+        text: "Travel with her."
+        next_node_id: "act1.keeper_interview"
+        effects:
+          - set_flag: "recruited_elara"
+      - id: "decline_elara"
+        text: "Decline her company."
+        next_node_id: "act1.ashwick_entrance"
+
+  # ---------- 4 deep exclusive scenes (one per protagonist) ----------
+  #
+  # Each is gated by that protagonist's starting_flags (so the
+  # condition is satisfied the moment their world is loaded),
+  # and currently has no upstream author route from the limited
+  # Act 1. Phase 38.C wires deeper Act 2/3 arcs that touch
+  # these. Phase 38.E's TestAllEndingsReachable sits on top.
+
+  - id: "kael.scholars_final_chapter"
+    title: "DEEP — Kael's final chapter with the order"
+    text: |
+      The librarian's lent lamp has burned low. You have read the
+      manuscript through twice; you read it through a third time.
+      The inscription matches what you remember of the stones; the
+      order's founder was your order's founder. Your grandmother
+      told you this would happen, and you did not believe her.
+      The manuscript closes itself.
+    choices:
+      - id: "close_the_book"
+        text: "Close the manuscript."
+        next_node_id: "act1.ashwick_entrance"
+        conditions:
+          - flag: "Kael_Protagonist"
+
+  - id: "lyra.runic_trial"
+    title: "DEEP — Lyra's first true inscription"
+    text: |
+      The chalk holds its shape for three full seconds before it
+      fades. Your grandmother would have laughed. The chisel feels
+      half its old weight; the slate, half its age. You remember
+      the lock you put on the door, and you undo it in your head,
+      and you inscribe another rune that holds its shape for
+      four seconds before it fades.
+    choices:
+      - id: "step_outside"
+        text: "Step outside. Take the road."
+        next_node_id: "act1.ashwick_entrance"
+        conditions:
+          - flag: "Lyra_Protagonist"
+
+  - id: "raven.heirs_judgment"
+    title: "DEEP — Raven's small inheritance"
+    text: |
+      You count what is in the lock-box, again, against the
+      letter you can read by heart. The figures match. The aunt's
+      lawyers told you there was nothing; the aunt's lawyers were
+      wrong. You put the signet ring back around your neck and
+      walk to the window of the room you have taken for the
+      night. Dawn is not far off.
+    choices:
+      - id: "walk_to_window"
+        text: "Walk to the window. Watch the dawn."
+        next_node_id: "act1.ashwick_entrance"
+        conditions:
+          - flag: "Raven_Protagonist"
+
+  - id: "aria.dawns_first_prayer"
+    title: "DEEP — Aria's first dawns"
+    text: |
+      Three shafts of light across the temple floor. The cup of
+      water the novices carry. Father Holt's voice reading from
+      the morning page. You kneel at the third shaft, the way
+      you knelt this morning and the morning before that and
+      every morning you have ever remembered, and you say the
+      prayer he taught you the first time he put a cup of water
+      in your hand.
+    choices:
+      - id: "kneel_through_prayer"
+        text: "Kneel through the prayer."
+        next_node_id: "act1.ashwick_entrance"
+        conditions:
+          - flag: "Aria_Protagonist"

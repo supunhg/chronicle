@@ -1,0 +1,45 @@
+# Chronicle v2 — frontier worldpack: companions
+#
+# Phase 38.A authoring. 6 companions per PHASES.md §38.B's
+# "Elara, Selene, Orion, plus the wider cast needed to populate
+# relationship-driven events in Acts 1–2." Three are romance
+# targets (Elara/Selene/Orion); three are supporting cast
+# (Aldric/Maren/Harlan) — see ARCHITECTURE.md §10, §15, §20.
+
+companions:
+
+  - id: "Elara"
+    description: |
+      A ranger from the eastern wood who knows the trails of
+      the kingdom better than any map; she was the one waiting
+      at Greyhall Keep's door when you came in from Ashwick.
+
+  - id: "Selene"
+    description: |
+      An elven mage exiled from the crystal spire, outcast for
+      her forbidden studies; the dragon-touched path begins
+      where the Arcanum ends.
+
+  - id: "Orion"
+    description: |
+      A grizzled mercenary captain with a sad smile and a ledger
+      full of debts; the wanderer path finds its footing where
+      Orion's feet have been.
+
+  - id: "Aldric"
+    description: |
+      Captain of Greyhall's guard; strict mentor with a soft
+      heart. He trained Elara before she quit the guard, and he
+      still writes to her twice a year on the same parchment.
+
+  - id: "Maren"
+    description: |
+      A scholar of the Arcanum who came to Ashwick fleeing the
+      Mages' guild politics; her letters to Selene never had a
+      salutation, and never needed one.
+
+  - id: "Harlan"
+    description: |
+      Orion's second-in-command — reliable when sober, sober
+      when the boss is sober. He speaks of Selene the way men
+      his age speak of departed sisters.

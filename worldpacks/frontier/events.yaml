@@ -1,0 +1,24 @@
+# Chronicle v2 — frontier worldpack: events
+#
+# Phase 38.A authoring. 3 events. Format mirrors the
+# canonical fixtures in docs/choice-yaml.md §3.
+
+events:
+
+  - id: "ally_call"
+    node_id: "act1.ally_appears_intro"
+    conditions:
+      - flag: "began_journey"
+
+  - id: "dragon_stirs"
+    node_id: "act1.void_dragon_reveal"
+    conditions:
+      - flag: "saw_eastern_ridge"
+
+  - id: "faith_renewed"
+    node_id: ""
+    # Pure sidebar: fires whenever the Faith-of-Dawn cutscene
+    # is queued (per §13). Does not redirect; choice's
+    # next_node_id wins.
+    conditions:
+      - flag: "Aria_Protagonist"

@@ -1,0 +1,69 @@
+# Chronicle v2 — frontier worldpack: protagonists
+#
+# Phase 38.A authoring. 4 playable protagonists per PHASES.md
+# §38.A and the README "Cast" section. Each carries two
+# ExclusiveNodes: the protagonist-specific opening, and a deep
+# Act 2/3 scene that the §38.E TestAllEndingsReachable gate
+# will eventually cover (the deep scenes are reachable when
+# Phase 38.C wires the deeper arcs).
+
+protagonists:
+
+  - name: "Kael"
+    starting_flags:
+      - "Kael_Protagonist"
+    starting_variables:
+      Courage: 50
+      DragonAffinity: 0
+      KingBloodline: 0
+    starting_inventory:
+      - "Iron Sword"
+    exclusive_nodes:
+      - "kael.fringe_searching"
+      - "kael.scholars_final_chapter"
+    starting_party: []
+
+  - name: "Lyra"
+    starting_flags:
+      - "Lyra_Protagonist"
+      - "HalfElf_Bloodline"
+    starting_variables:
+      Courage: 30
+      MagicAffinity: 60
+      DragonAffinity: 0
+    starting_inventory:
+      - "Rune Chisel"
+    exclusive_nodes:
+      - "lyra.runesmith_workshop"
+      - "lyra.runic_trial"
+    starting_party: []
+
+  - name: "Raven"
+    starting_flags:
+      - "Raven_Protagonist"
+      - "Rightful_Heir"
+    starting_variables:
+      Courage: 40
+      KingBloodline: 100
+      DragonAffinity: 0
+    starting_inventory:
+      - "Royal Signet"
+    exclusive_nodes:
+      - "raven.disgraced_inn"
+      - "raven.heirs_judgment"
+    starting_party: []
+
+  - name: "Aria"
+    starting_flags:
+      - "Aria_Protagonist"
+      - "Faith_Dawn"
+    starting_variables:
+      Courage: 20
+      Faith: 50
+      DragonAffinity: 0
+    starting_inventory:
+      - "Dawn Pendant"
+    exclusive_nodes:
+      - "aria.dawn_temple"
+      - "aria.dawns_first_prayer"
+    starting_party: []

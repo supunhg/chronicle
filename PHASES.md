@@ -83,7 +83,7 @@ Write the actual story. Aspirational first cut: 5 acts ≥ 150 nodes,
 
 | Sub | Goal | Acceptance test | Status |
 |---|---|---|---|
-| **38.A** | Four protagonist YAMLs in `content/protagonists/`: Kael, Lyra, Raven, Aria. Each with a unique opening node and a small `ExclusiveNodes` set. | The character-select screen presents all 4. Each protagonist can be picked and reaches the Act 1 opening. |
+| **38.A** | Four protagonist YAMLs in `content/protagonists/`: Kael, Lyra, Raven, Aria. Each with a unique opening node and a small `ExclusiveNodes` set. | The character-select screen presents all 4. Each protagonist can be picked and reaches the Act 1 opening. | ✅ done |
 | **38.B** | Companion YAMLs in `content/companions/`: Elara, Selene, Orion, plus the wider cast needed to populate relationship-driven events in Acts 1–2. | Trust/Affection deltas work. The Trust ≥ 50 / Affection ≥ 75 / Trust ≤ −50 scenes for Elara are authored (see §10 Relationship Events). |
 | **38.C** | Acts 1 + 2 authored (20 + 50 = 70 nodes minimum). The Dragon Relic quest (Act 1) and the ally-gathering arc (Act 2) are complete and playtested for each of the 4 protagonists. | A playthrough of "pick protagonist → reach end of Act 2" succeeds for all 4 protagonists. |
 | **38.D** | Acts 3–5 authored (40 + 50 + 20 = 110 nodes). The Void Dragon reveal (Act 3), the war (Act 4), the finale (Act 5) are complete. | A full playthrough from start to a v2 ending succeeds. |

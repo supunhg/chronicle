@@ -1,0 +1,84 @@
+# Chronicle v2 — frontier worldpack: endings
+#
+# Phase 38.A authoring. 12 endings per ARCHITECTURE.md §20.
+# Phase 38.E's TestAllEndingsReachable gate sits on top; for
+# Phase 38.A the priority column + condition column are
+# structurally complete.
+#
+# Condition kinds used here are limited to those the Phase 37
+# canonical schema actually supports (flag / variable /
+# relationship / has_item / has_ending / or / and / not per
+# docs/choice-yaml.md §1). Reputation-based endings would
+# require a future-phase schema extension (story.ModifyReputation
+# is an effect, not yet a condition). §38.D is expected to add
+# the "reputation" condition kind — for now the non-romance
+# variants gate on flags that Phase 38.D's deeper arcs set.
+#
+# Priority convention:
+#   0  wanderer                 always-valid fallback
+#   1-7 non-romance variants     gated by flags (set in Act 5)
+#   8  dragon_sovereign         gated by drag-on-sovereignty flag
+#   9-11  romance variants        relationship-trust/affection
+
+endings:
+
+  - id: "wanderer"
+    priority: 0
+    # No conditions: always valid. Default if no higher-priority
+    # ending matched at the finale (per §19 fallback pattern).
+
+  - id: "hero"
+    priority: 1
+    conditions:
+      - flag: "mid_completed"
+      - flag: "saved_companions"
+
+  - id: "dragon_alliance"
+    priority: 2
+    conditions:
+      - flag: "dragon_kinship_offered"
+
+  - id: "kingdom"
+    priority: 3
+    conditions:
+      - flag: "kingdom_aligned"
+
+  - id: "archmage"
+    priority: 4
+    conditions:
+      - flag: "archmage_unbound"
+
+  - id: "shadow_lord"
+    priority: 5
+    conditions:
+      - flag: "underworld_broken"
+
+  - id: "world_guardian"
+    priority: 6
+    conditions:
+      - flag: "both_worlds_saved"
+
+  - id: "corruption"
+    priority: 7
+    conditions:
+      - flag: "descent_into_dark"
+
+  - id: "dragon_sovereign"
+    priority: 8
+    conditions:
+      - flag: "dragon_sovereign_crowned"
+
+  - id: "elara_romance"
+    priority: 9
+    conditions:
+      - relationship: { character: "Elara", axis: "affection", value: 75 }
+
+  - id: "selene_romance"
+    priority: 10
+    conditions:
+      - relationship: { character: "Selene", axis: "trust", value: 50 }
+
+  - id: "orion_romance"
+    priority: 11
+    conditions:
+      - relationship: { character: "Orion", axis: "affection", value: 75 }
