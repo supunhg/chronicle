@@ -51,6 +51,17 @@ type WorldState struct {
 	// entry at the finale (Step appends on transition into a
 	// final node when an ending evaluates).
 	EndingsUnlocked []string
+
+	// TriggeredEvents is the per-Step queue of event IDs queued
+	// by TriggerEvent effects. Step applies choice Effects in
+	// order; events triggered by those effects accumulate here.
+	// Phase 36.D's event handler reads this queue, fires matching
+	// events, and clears it before the next Step.
+	//
+	// Phase 36.B declares this field for TriggerEvent's effect
+	// queue management; Phase 36.D adds the handler that
+	// consumes the queue.
+	TriggeredEvents []string
 }
 
 // Relationship is the per-companion trust/affection/respect
@@ -108,5 +119,6 @@ func NewWorldState() WorldState {
 		Inventory:       Inventory{Items: make(map[string]int)},
 		Party:           []string{},
 		EndingsUnlocked: []string{},
+		TriggeredEvents: []string{},
 	}
 }

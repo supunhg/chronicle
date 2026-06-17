@@ -94,6 +94,14 @@ func (r *Runner) Step(s state.SaveGame) (state.SaveGame, error) {
 		}
 	}
 
+	// TODO(phase-36.D): ws.TriggeredEvents (queued by TriggerEvent
+	// effects in the loop above) is consumed-and-cleared by
+	// internal/events (Phase 36.D). If 36.D's handler is absent
+	// or forgets to clear, the queue would re-fire events across
+	// Steps; the contract is documented on
+	// state.WorldState.TriggeredEvents. 36.D must clear the slice
+	// after firing matched events.
+
 	s.WorldState.CurrentNodeID = chosen.NextNodeID
 	s.WorldState.Tick++
 
