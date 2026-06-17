@@ -11,9 +11,16 @@
 //
 //   - `save`         — write a SaveGame JSON to disk. §39.C.
 //   - `resume`       — rehydrate a SaveGame, drop the player at
-//                      CurrentNodeID. §39.D.
-//   - `info / diff`  — read-only inspection of saves. (lands in
-//                      §39.E.)
+//                      CurrentNodeID. §39.D. With `--json`,
+//                      emits the canonical SaveGame to stdout
+//                      for shell piping. §39.E.
+//   - `info`         — print a single-save human-readable
+//                      summary to stdout. §39.E follow-up #1.
+//   - `diff`         — compare two saves; print field-level
+//                      discrepancies. Exit 1 if any differences
+//                      found (standard `diff` semantics);
+//                      exit 2 if either file fails to load.
+//                      §39.E follow-up #1.
 //   - default        — print roadmap + exit 0.
 //
 // The v1 simulation stack (sqlite persistence, simulation
@@ -22,6 +29,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -50,9 +58,27 @@ func main() {
 			os.Exit(1)
 		}
 	case "resume":
-		if err := runResume(args[1:], os.Stderr); err != nil {
+		if err := runResume(args[1:], os.Stdout, os.Stderr); err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
 			os.Exit(1)
+		}
+	case "info":
+		if err := runInfo(args[1:], os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+	case "diff":
+		if err := runDiff(args[1:], os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			// diff follows standard `diff` exit semantics: 1 if
+			// differences found (errDiffFound sentinel), 2 if a
+			// load/parse error tripped before comparison could
+			// complete. Wrapped load errors come back as their
+			// own non-nil type and fall through to 2.
+			if errors.Is(err, errDiffFound) {
+				os.Exit(1)
+			}
+			os.Exit(2)
 		}
 	case "version", "--version", "-v":
 		fmt.Fprintf(os.Stdout, "chronicle v%s\n", version)
@@ -65,14 +91,20 @@ func main() {
 	}
 }
 
-func printRoadmap(w io.Writer) {
-	fmt.Fprintf(w, "chronicle v%s\n", version)
+func printRoadmap(w io.Writer) {		fmt.Fprintf(w, "chronicle v%s\n", version)
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Available v2 CLI subcommands:")
 	fmt.Fprintln(w, "  save       write a SaveGame JSON to disk (-out, -from, §39.C)")
+	fmt.Fprintln(w, "  resume     rehydrate a SaveGame from disk; --json (§39.E)")
+	fmt.Fprintln(w, "             emits canonical SaveGame to stdout")
+	fmt.Fprintln(w, "  info       print a single-save summary to stdout")
+	fmt.Fprintln(w, "             (§39.E follow-up #1)")
+	fmt.Fprintln(w, "  diff       compare two saves; exit 1 if differences")
+	fmt.Fprintln(w, "             (§39.E follow-up #1)")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Use `chronicle help` for the full command list. Coming in")
-	fmt.Fprintln(w, "later phases: resume (§39.D), info/diff (§39.E).")
+	fmt.Fprintln(w, "later phases: engine runner (§40), persistence drop")
+	fmt.Fprintln(w, "(§39.F).")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "v2 module scaffold verified at build time via blank imports")
 	fmt.Fprintln(w, "of internal/{engine, story, state, events, endings, content,")
@@ -84,7 +116,11 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "Usage: chronicle <subcommand> [flags]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Subcommands:")
-	fmt.Fprintln(w, "  save        write a SaveGame JSON to disk")
+	fmt.Fprintln(w, "  save        write a SaveGame JSON to disk (-out, -from)")
+	fmt.Fprintln(w, "  resume      rehydrate a SaveGame from disk; --json emits the")
+	fmt.Fprintln(w, "              canonical SaveGame to stdout for piping")
+	fmt.Fprintln(w, "  info        print a single-save summary to stdout")
+	fmt.Fprintln(w, "  diff        compare two saves; exit 1 if differences")
 	fmt.Fprintln(w, "  version     print the Chronicle version")
 	fmt.Fprintln(w, "  help        print this message")
 }
