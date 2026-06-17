@@ -167,6 +167,7 @@ nodes:
         text: "Investigate the ruins."
         next_node_id: "act1.void_dragon_reveal"
         effects:
+          - set_flag: "saw_eastern_ridge"
           - modify_variable: { key: "Courage", value: 60 }
           - trigger_event: "dragon_stirs"
       - id: "return_to_keep"
