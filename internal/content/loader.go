@@ -159,329 +159,19 @@ func fileExists(path string) bool {
 
 // ----- nodes.yaml -----
 
-type nodeDoc struct {
-	Nodes []yamlNode `yaml:"nodes"`
-}
-
-type yamlNode struct {
-	ID      string       `yaml:"id"`
-	Title   string       `yaml:"title"`
-	Text    string       `yaml:"text"`
-	IsFinal bool         `yaml:"is_final"`
-	Choices []yamlChoice `yaml:"choices"`
-}
-
-type yamlChoice struct {
-	ID         string           `yaml:"id"`
-	Text       string           `yaml:"text"`
-	Conditions []map[string]any `yaml:"conditions,omitempty"`
-	Effects    []map[string]any `yaml:"effects,omitempty"`
-	NextNodeID string           `yaml:"next_node_id"`
-}
-
+// readNodes delegates the YAML→StoryNode translation to
+// internal/story.LoadStoryNodes (the canonical schema parser
+// per PHASES.md §37.A). readNodes owns only the file I/O.
 func readNodes(path string) ([]story.StoryNode, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("content: readNodes: %s: %w", path, err)
 	}
-	var doc nodeDoc
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("content: readNodes: parse %s: %w", path, err)
-	}
-	out := make([]story.StoryNode, 0, len(doc.Nodes))
-	for i, yn := range doc.Nodes {
-		node, err := convertNode(yn)
-		if err != nil {
-			return nil, fmt.Errorf("content: readNodes: %s node[%d]: %w", path, i, err)
-		}
-		out = append(out, node)
-	}
-	return out, nil
-}
-
-func convertNode(yn yamlNode) (story.StoryNode, error) {
-	if yn.ID == "" {
-		return story.StoryNode{}, errors.New("node has empty id")
-	}
-	out := story.StoryNode{
-		ID:      yn.ID,
-		Title:   yn.Title,
-		Text:    yn.Text,
-		IsFinal: yn.IsFinal,
-	}
-	for i, yc := range yn.Choices {
-		c, err := convertChoice(yc)
-		if err != nil {
-			return story.StoryNode{}, fmt.Errorf("choice[%d] %q: %w", i, yc.ID, err)
-		}
-		out.Choices = append(out.Choices, c)
-	}
-	return out, nil
-}
-
-func convertChoice(yc yamlChoice) (story.Choice, error) {
-	if yc.ID == "" {
-		return story.Choice{}, errors.New("choice has empty id")
-	}
-	out := story.Choice{
-		ID:         yc.ID,
-		Text:       yc.Text,
-		NextNodeID: yc.NextNodeID,
-	}
-	for i, raw := range yc.Conditions {
-		cond, err := unmarshalCondition(raw)
-		if err != nil {
-			return story.Choice{}, fmt.Errorf("condition[%d]: %w", i, err)
-		}
-		out.Conditions = append(out.Conditions, cond)
-	}
-	for i, raw := range yc.Effects {
-		eff, err := unmarshalEffect(raw)
-		if err != nil {
-			return story.Choice{}, fmt.Errorf("effect[%d]: %w", i, err)
-		}
-		out.Effects = append(out.Effects, eff)
-	}
-	return out, nil
-}
-
-// unmarshalCondition decodes a single-key-map condition from
-// YAML into its concrete story.Condition. The key names the
-// kind ("flag", "variable", ...) and the value is the
-// condition's payload. Single-key maps surface a typo loud:
-// a malformed condition with multiple keys is an error, not
-// a silent drop of the extras.
-func unmarshalCondition(raw map[string]any) (story.Condition, error) {
-	if len(raw) != 1 {
-		return nil, fmt.Errorf("condition expected single-key map (got %d keys)", len(raw))
-	}
-	for kind, v := range raw {
-		return decodeConditionKind(kind, v)
-	}
-	return nil, errors.New("condition: empty map (unreachable)")
-}
-
-func decodeConditionKind(kind string, v any) (story.Condition, error) {
-	switch kind {
-	case "flag":
-		key, err := asString(v)
-		if err != nil {
-			return nil, fmt.Errorf("flag: %w", err)
-		}
-		return story.Flag{Key: key}, nil
-	case "variable":
-		mm, err := asMap(v)
-		if err != nil {
-			return nil, fmt.Errorf("variable: %w", err)
-		}
-		key, err := asString(mm["key"])
-		if err != nil {
-			return nil, fmt.Errorf("variable.key: %w", err)
-		}
-		val, err := asInt(mm["value"])
-		if err != nil {
-			return nil, fmt.Errorf("variable.value: %w", err)
-		}
-		return story.VariableGE{Key: key, Value: val}, nil
-	case "relationship":
-		mm, err := asMap(v)
-		if err != nil {
-			return nil, fmt.Errorf("relationship: %w", err)
-		}
-		char, err := asString(mm["character"])
-		if err != nil {
-			return nil, fmt.Errorf("relationship.character: %w", err)
-		}
-		axisStr, err := asString(mm["axis"])
-		if err != nil {
-			return nil, fmt.Errorf("relationship.axis: %w", err)
-		}
-		axis, ok := story.ParseRelationshipAxis(axisStr)
-		if !ok {
-			return nil, fmt.Errorf("relationship.axis %q unrecognized (want trust/affection/respect)", axisStr)
-		}
-		val, err := asInt(mm["value"])
-		if err != nil {
-			return nil, fmt.Errorf("relationship.value: %w", err)
-		}
-		return story.RelationshipGE{Character: char, Axis: axis, Value: val}, nil
-	case "has_item":
-		key, err := asString(v)
-		if err != nil {
-			return nil, fmt.Errorf("has_item: %w", err)
-		}
-		return story.HasItem{Key: key}, nil
-	case "has_ending":
-		id, err := asString(v)
-		if err != nil {
-			return nil, fmt.Errorf("has_ending: %w", err)
-		}
-		return story.HasEnding{ID: id}, nil
-	case "or":
-		inner, err := unmarshalConditions(v)
-		if err != nil {
-			return nil, fmt.Errorf("or: %w", err)
-		}
-		return story.Or{Conditions: inner}, nil
-	case "and":
-		inner, err := unmarshalConditions(v)
-		if err != nil {
-			return nil, fmt.Errorf("and: %w", err)
-		}
-		return story.And{Conditions: inner}, nil
-	case "not":
-		mm, err := asMap(v)
-		if err != nil {
-			return nil, fmt.Errorf("not: %w", err)
-		}
-		inner, err := unmarshalCondition(mm)
-		if err != nil {
-			return nil, fmt.Errorf("not: %w", err)
-		}
-		return story.Not{Inner: inner}, nil
-	}
-	return nil, fmt.Errorf("unknown condition kind %q", kind)
-}
-
-// unmarshalConditions decodes a list of single-key-map
-// conditions. Used by the Or/And combinators.
-func unmarshalConditions(raw any) ([]story.Condition, error) {
-	list, err := asSlice(raw)
+	nodes, err := story.LoadStoryNodes(raw)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("content: readNodes: %s: %w", path, err)
 	}
-	out := make([]story.Condition, 0, len(list))
-	for i, e := range list {
-		mm, err := asMap(e)
-		if err != nil {
-			return nil, fmt.Errorf("combinator child[%d]: %w", i, err)
-		}
-		cond, err := unmarshalCondition(mm)
-		if err != nil {
-			return nil, fmt.Errorf("combinator child[%d]: %w", i, err)
-		}
-		out = append(out, cond)
-	}
-	return out, nil
-}
-
-// unmarshalEffect decodes a single-key-map effect from YAML
-// into its concrete story.Effect. Same key-disciplined
-// convention as unmarshalCondition.
-func unmarshalEffect(raw map[string]any) (story.Effect, error) {
-	if len(raw) != 1 {
-		return nil, fmt.Errorf("effect expected single-key map (got %d keys)", len(raw))
-	}
-	for kind, v := range raw {
-		return decodeEffectKind(kind, v)
-	}
-	return nil, errors.New("effect: empty map (unreachable)")
-}
-
-func decodeEffectKind(kind string, v any) (story.Effect, error) {
-	switch kind {
-	case "set_flag":
-		key, err := asString(v)
-		if err != nil {
-			return nil, fmt.Errorf("set_flag: %w", err)
-		}
-		return story.SetFlag{Key: key}, nil
-	case "clear_flag":
-		key, err := asString(v)
-		if err != nil {
-			return nil, fmt.Errorf("clear_flag: %w", err)
-		}
-		return story.ClearFlag{Key: key}, nil
-	case "modify_variable":
-		mm, err := asMap(v)
-		if err != nil {
-			return nil, fmt.Errorf("modify_variable: %w", err)
-		}
-		key, err := asString(mm["key"])
-		if err != nil {
-			return nil, fmt.Errorf("modify_variable.key: %w", err)
-		}
-		val, err := asInt(mm["value"])
-		if err != nil {
-			return nil, fmt.Errorf("modify_variable.value: %w", err)
-		}
-		return story.ModifyVariable{Key: key, Value: val}, nil
-	case "modify_relationship":
-		mm, err := asMap(v)
-		if err != nil {
-			return nil, fmt.Errorf("modify_relationship: %w", err)
-		}
-		char, err := asString(mm["character"])
-		if err != nil {
-			return nil, fmt.Errorf("modify_relationship.character: %w", err)
-		}
-		axisStr, err := asString(mm["axis"])
-		if err != nil {
-			return nil, fmt.Errorf("modify_relationship.axis: %w", err)
-		}
-		axis, ok := story.ParseRelationshipAxis(axisStr)
-		if !ok {
-			return nil, fmt.Errorf("modify_relationship.axis %q unrecognized (want trust/affection/respect)", axisStr)
-		}
-		val, err := asInt(mm["value"])
-		if err != nil {
-			return nil, fmt.Errorf("modify_relationship.value: %w", err)
-		}
-		return story.ModifyRelationship{Character: char, Axis: axis, Value: val}, nil
-	case "modify_reputation":
-		mm, err := asMap(v)
-		if err != nil {
-			return nil, fmt.Errorf("modify_reputation: %w", err)
-		}
-		factionStr, err := asString(mm["faction"])
-		if err != nil {
-			return nil, fmt.Errorf("modify_reputation.faction: %w", err)
-		}
-		faction, ok := story.ParseFaction(factionStr)
-		if !ok {
-			return nil, fmt.Errorf("modify_reputation.faction %q unrecognized (want kingdom/mages/dragons/underworld)", factionStr)
-		}
-		val, err := asInt(mm["value"])
-		if err != nil {
-			return nil, fmt.Errorf("modify_reputation.value: %w", err)
-		}
-		return story.ModifyReputation{Faction: faction, Value: val}, nil
-	case "add_item":
-		mm, err := asMap(v)
-		if err != nil {
-			return nil, fmt.Errorf("add_item: %w", err)
-		}
-		key, err := asString(mm["key"])
-		if err != nil {
-			return nil, fmt.Errorf("add_item.key: %w", err)
-		}
-		count, err := asInt(mm["count"])
-		if err != nil {
-			return nil, fmt.Errorf("add_item.count: %w", err)
-		}
-		return story.AddItem{Key: key, Count: count}, nil
-	case "remove_item":
-		mm, err := asMap(v)
-		if err != nil {
-			return nil, fmt.Errorf("remove_item: %w", err)
-		}
-		key, err := asString(mm["key"])
-		if err != nil {
-			return nil, fmt.Errorf("remove_item.key: %w", err)
-		}
-		count, err := asInt(mm["count"])
-		if err != nil {
-			return nil, fmt.Errorf("remove_item.count: %w", err)
-		}
-		return story.RemoveItem{Key: key, Count: count}, nil
-	case "trigger_event":
-		id, err := asString(v)
-		if err != nil {
-			return nil, fmt.Errorf("trigger_event: %w", err)
-		}
-		return story.TriggerEvent{ID: id}, nil
-	}
-	return nil, fmt.Errorf("unknown effect kind %q", kind)
+	return nodes, nil
 }
 
 // ----- events.yaml -----
@@ -507,15 +197,15 @@ func readEvents(path string) ([]story.Event, error) {
 	}
 	out := make([]story.Event, 0, len(doc.Events))
 	for i, ye := range doc.Events {
+		if ye.ID == "" {
+			return nil, fmt.Errorf("content: readEvents: %s event[%d] has empty id", path, i)
+		}
 		ev := story.Event{
 			ID:     ye.ID,
 			NodeID: ye.NodeID,
 		}
-		if ye.ID == "" {
-			return nil, fmt.Errorf("content: readEvents: %s event[%d] has empty id", path, i)
-		}
 		for j, raw := range ye.Conditions {
-			cond, err := unmarshalCondition(raw)
+			cond, err := story.UnmarshalCondition(raw)
 			if err != nil {
 				return nil, fmt.Errorf("content: readEvents: %s event[%d] %q condition[%d]: %w", path, i, ye.ID, j, err)
 			}
@@ -549,15 +239,15 @@ func readEndings(path string) ([]endings.Ending, error) {
 	}
 	out := make([]endings.Ending, 0, len(doc.Endings))
 	for i, ye := range doc.Endings {
+		if ye.ID == "" {
+			return nil, fmt.Errorf("content: readEndings: %s ending[%d] has empty id", path, i)
+		}
 		en := endings.Ending{
 			ID:       ye.ID,
 			Priority: ye.Priority,
 		}
-		if ye.ID == "" {
-			return nil, fmt.Errorf("content: readEndings: %s ending[%d] has empty id", path, i)
-		}
 		for j, raw := range ye.Conditions {
-			cond, err := unmarshalCondition(raw)
+			cond, err := story.UnmarshalCondition(raw)
 			if err != nil {
 				return nil, fmt.Errorf("content: readEndings: %s ending[%d] %q condition[%d]: %w", path, i, ye.ID, j, err)
 			}
@@ -720,47 +410,4 @@ func validatePartyCompanions(protagonists []Protagonist, companions map[string]C
 		}
 	}
 	return nil
-}
-
-// ----- Helpers for YAML value coercion -----
-
-func asString(v any) (string, error) {
-	s, ok := v.(string)
-	if !ok {
-		return "", fmt.Errorf("expected string, got %T", v)
-	}
-	if s == "" {
-		return "", errors.New("empty string")
-	}
-	return s, nil
-}
-
-func asInt(v any) (int, error) {
-	switch t := v.(type) {
-	case int:
-		return t, nil
-	case int64:
-		return int(t), nil
-	case float64:
-		return int(t), nil
-	case uint64:
-		return int(t), nil
-	}
-	return 0, fmt.Errorf("expected int, got %T", v)
-}
-
-func asMap(v any) (map[string]any, error) {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("expected map, got %T", v)
-	}
-	return m, nil
-}
-
-func asSlice(v any) ([]any, error) {
-	s, ok := v.([]any)
-	if !ok {
-		return nil, fmt.Errorf("expected slice, got %T", v)
-	}
-	return s, nil
 }
