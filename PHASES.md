@@ -100,7 +100,7 @@ Implement the JSON persistence per §18 and §18A. Drop SQLite.
 |---|---|---|---|
 | **39.A** | `SaveGame` JSON schema (per §18 + §18A invariants). Canonical JSON encoding (sorted keys, normalized numbers) so that byte-stable round-trip is achievable. | `TestSaveLoadRoundTrip`: pre-save `WorldHash` equals post-load `WorldHash`. | ✅ done |
 | **39.B** | Versioning framework. The save's `Version` field gates load-time migration. No silent migration. | An old-version save refuses to load with a clear error message. A new-version save loads fine. | ✅ done |
-| **39.C** | `save` CLI subcommand. `./chronicle save -out myrun.json` writes a `SaveGame` to disk at the current world state. | Manual smoke test. |
+| **39.C** | `save` CLI subcommand. `./chronicle save -out myrun.json` writes a `SaveGame` to disk at the current world state. | Manual smoke test. | ✅ done |
 | **39.D** | `resume` CLI subcommand. `./chronicle resume myrun.json` rehydrates the world from disk and drops the player at `WorldState.CurrentNodeID`. | Manual smoke test. |
 | **39.E** | `info` and `diff` subcommands. Read-only inspection and comparison of two `.json` saves. | Manual smoke test. |
 | **39.F** | Drop `modernc.org/sqlite` from `go.mod` and `go.sum`. The SQLite persistence layer (`internal/persistence`) is deleted along with the world-AI weekly generation artefacts. | `go mod tidy` + `grep sqlite .` returns no `.go` references. |

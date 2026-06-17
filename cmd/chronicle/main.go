@@ -5,34 +5,27 @@
 // tree via blank imports so any build breakage in those packages
 // surfaces at `go build` time even before subcommands exist.
 //
-// Actual CLI subcommands will land in subsequent sub-phases:
+// Phase 39 lands the persistence CLI. Subcommands dispatch on
+// os.Args[1] (no cobra/urfave dependency — stdlib flag is
+// sufficient for the current surface):
 //
-//   - Phase 36.A  internal/engine StoryEngine (runner.go) implements §23.
-//   - Phase 36.B  internal/story types (StoryNode, Choice, Condition, Effect).
-//   - Phase 36.C  internal/state types (WorldState, SaveGame, JSON I/O).
-//   - Phase 36.D  internal/events triggered events + internal/endings eval.
-//   - Phase 36.E  internal/content YAML loader (content/ → tree).
-//   - Phase 36.F  internal/ui/cli.go choice-menu renderer + scanner.
-//   - Phase 39.A-E save / resume / info / diff subcommands.
-//   - Phase 40.A-E Definition-of-Done gates (per ARCHITECTURE.md §25).
+//   - `save`         — write a SaveGame JSON to disk. §39.C.
+//   - `resume`       — rehydrate a SaveGame, drop the player at
+//                      CurrentNodeID. (lands in §39.D.)
+//   - `info / diff`  — read-only inspection of saves. (lands in
+//                      §39.E.)
+//   - default        — print roadmap + exit 0.
 //
-// The v1 simulation stack (sqlite persistence, simulation engines,
-// LLM-first narration, intent parser, REPL) is retired per Phase 35
-// (commits 166694d, c5fcb10, 9b0a1d3, 0606088, 991941e).
-//
-// See ARCHITECTURE.md §22 (Engine Architecture), §23 (Runtime Flow),
-// chronicle-v2-pivot-spec.md, and PHASES.md for the binding plan.
+// The v1 simulation stack (sqlite persistence, simulation
+// engines, LLM-first narration, intent parser, REPL) is retired
+// per Phase 35.
 package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
-	// v2 module scaffold — blank imports so build breakage of any v2
-	// package surfaces at `go build` time even before subcommands
-	// exist. These are side-effect-only until 36.A–36.F land real
-	// types and engine wiring. See internal/{content,engine,...}/doc.go
-	// in each respective package for the sub-phase that owns each one.
 	_ "github.com/chronicle-dev/chronicle/internal/content"
 	_ "github.com/chronicle-dev/chronicle/internal/engine"
 	_ "github.com/chronicle-dev/chronicle/internal/endings"
@@ -45,19 +38,48 @@ import (
 const version = "2.0.0-dev"
 
 func main() {
-	fmt.Fprintf(os.Stderr, "chronicle v%s\n", version)
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Phase 36 v2 module scaffold landed.")
-	fmt.Fprintln(os.Stderr, "7 v2 packages compiled cleanly: engine, story, state,")
-	fmt.Fprintln(os.Stderr, "events, endings, content, ui.")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "v2 CLI subcommands not yet implemented. Roadmap:")
-	fmt.Fprintln(os.Stderr, "  Phase 36.A  internal/engine StoryEngine — runner.go (§23).")
-	fmt.Fprintln(os.Stderr, "  Phase 36.B–E  story / state / events / endings / content types.")
-	fmt.Fprintln(os.Stderr, "  Phase 36.F  internal/ui/cli.go (choice-menu renderer).")
-	fmt.Fprintln(os.Stderr, "  Phase 39.A–E  save / resume / info / diff CLI.")
-	fmt.Fprintln(os.Stderr, "  Phase 40.A–E  v2 acceptance gates (ARCHITECTURE.md §25).")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "v1 simulation stack retired in Phase 35 (35.A–35.F). See")
-	fmt.Fprintln(os.Stderr, "PHASES.md for the rollout order and ARCHITECTURE.md for v2.")
+	args := os.Args[1:]
+	if len(args) == 0 {
+		printRoadmap(os.Stderr)
+		return
+	}
+	switch args[0] {
+	case "save":
+		if err := runSave(args[1:], os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+	case "version", "--version", "-v":
+		fmt.Fprintf(os.Stdout, "chronicle v%s\n", version)
+	case "help", "--help", "-h":
+		printHelp(os.Stderr)
+	default:
+		fmt.Fprintf(os.Stderr, "chronicle: unknown subcommand %q\n\n", args[0])
+		printHelp(os.Stderr)
+		os.Exit(1)
+	}
+}
+
+func printRoadmap(w io.Writer) {
+	fmt.Fprintf(w, "chronicle v%s\n", version)
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Available v2 CLI subcommands:")
+	fmt.Fprintln(w, "  save       write a SaveGame JSON to disk (-out, -from, §39.C)")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Use `chronicle help` for the full command list. Coming in")
+	fmt.Fprintln(w, "later phases: resume (§39.D), info/diff (§39.E).")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "v2 module scaffold verified at build time via blank imports")
+	fmt.Fprintln(w, "of internal/{engine, story, state, events, endings, content,")
+	fmt.Fprintln(w, "ui}. See PHASES.md for the rollout order.")
+}
+
+func printHelp(w io.Writer) {
+	fmt.Fprintf(w, "chronicle v%s\n\n", version)
+	fmt.Fprintln(w, "Usage: chronicle <subcommand> [flags]")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "Subcommands:")
+	fmt.Fprintln(w, "  save        write a SaveGame JSON to disk")
+	fmt.Fprintln(w, "  version     print the Chronicle version")
+	fmt.Fprintln(w, "  help        print this message")
 }
