@@ -897,7 +897,7 @@ nodes:
   #
   # Realm-claim choices below are unconditional: the realm
   # claim is the moment of commitment, not a stat / narrative-
-  # moment gate. Earlier Phase 38.D drafts of
+  # moment gate. Earlier §38.D drafts of
   # claim_kingdoms_throne / claim_unbound_magic /
   # claim_dragon_kinship each had a conditions block that
   # effectively locked those endings to one protagonist
@@ -905,10 +905,10 @@ nodes:
   # saw_void_dragon — Aria could not reach saw_void_dragon
   # because she starts at Courage 20, below the 30 needed for
   # act1.ashwick_entrance.head_east). Those three conditions
-  # were dropped in commit 42dc2bb + 7365d96 to preserve
-  # §38.E's per-protagonist reachability contract. claim_serpent_crown
+  # were dropped post-§38.D to preserve §38.E's
+  # per-protagonist reachability contract. claim_serpent_crown
   # remains gated on relic_claimed because the protagonist
-  # holding the relic is the narrative gate for dragon_sovereign.
+  # holding the relic IS the narrative gate for dragon_sovereign.
   #
   # Acceptance (PHASES.md §38.D): each of the 12 endings'
   # conditions resolves against a synthetic protagonist-path
