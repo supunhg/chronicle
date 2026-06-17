@@ -973,6 +973,62 @@ nodes:
         next_node_id: "act3.claim_dragon_sovereign"
         conditions:
           - flag: "relic_claimed"
+      # Schema-coverage choices (Phase 40.A follow-up #1).
+      # Each choice exercises one or more Condition/Effect types
+      # that the Phase 37.B schema declares but the frontier
+      # worldpack was not previously exercising: HasItem, Not,
+      # HasEnding, Or, And conditions plus AddItem, ClearFlag,
+      # RemoveItem effects. The runtimeWalk tests enumerate
+      # choices by id and pick the FIRST match in
+      # AvailableChoices, so adding sibling choices gated by
+      # fresh flags / inventory / endings does not perturb
+      # any existing test path.
+      - id: "consume_iron_sword"
+        text: "Sheathe the iron sword into the keep's stone; its edge dulls against the relic's hum."
+        next_node_id: "act3.the_end"
+        conditions:
+          - has_item: "Iron Sword"
+        effects:
+          - remove_item: { key: "Iron Sword", count: 1 }
+      - id: "pick_up_coin"
+        text: "A handful of coins lies half-buried underfoot; gather them."
+        next_node_id: "act3.the_end"
+        conditions:
+          - not: { flag: "rested" }
+        effects:
+          - add_item: { key: "Coin", count: 5 }
+      - id: "return_relic"
+        text: "Lay the dragon relic back into the vault; the humming stops."
+        next_node_id: "act3.the_end"
+        conditions:
+          - flag: "relic_claimed"
+        effects:
+          - clear_flag: "relic_claimed"
+      - id: "remember_wanderer"
+        text: "Recall the wandering life you once lived; the keep's silence answers back."
+        next_node_id: "act3.the_end"
+        conditions:
+          - has_ending: "wanderer"
+        effects:
+          - set_flag: "considered_wanderer"
+      - id: "claim_weathered_path"
+        text: "Whether by crown or by courage, you have a seat at the table."
+        next_node_id: "act3.the_end"
+        conditions:
+          - or:
+              - flag: "kingdom_aligned"
+              - variable: { key: "Courage", value: 50 }
+        effects:
+          - add_item: { key: "Tide-Coin", count: 1 }
+      - id: "claim_brave_and_trusting"
+        text: "You have walked heroic roads and Elara still trusts you; spend a coin to remember."
+        next_node_id: "act3.the_end"
+        conditions:
+          - and:
+              - flag: "mid_completed"
+              - relationship: { character: "Elara", axis: "trust", value: 25 }
+        effects:
+          - remove_item: { key: "Coin", count: 1 }
 
   - id: "act3.elaras_vigil"
     title: "E2 — Elara's vigil, by torchlight"
