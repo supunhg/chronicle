@@ -1,168 +1,153 @@
-# Chronicle — V1 Phase Checklist
+# Chronicle v2 — Phase Checklist
 
-This is the working checklist the user asked for: "step by step, mark
-off a phase from a checklist to keep track." Each phase has a goal, an
-acceptance test, and a status. The full spec is in
-[`ARCHITECTURE.md`](./ARCHITECTURE.md).
+This is the working phase list for the Chronicle v2 migration. It
+picks up after Phase 33 (immersive text adventure transformation),
+which was the last phase of the **v1 simulation design**.
+
+The v1 simulation design is now retired in the documentation
+(see [`ARCHITECTURE.md`](./ARCHITECTURE.md)). The remaining work is
+**retire the v1 code, build the v2 code, author the content, ship
+v2**. This checklist tracks that work.
 
 **Legend:** ✅ done (committed) · 🔧 done (in working tree, uncommitted)
 · ⬜ not started · ⚠️ partially done
 
-> **Note:** Phases 30–33 were completed as shipped work. Phases 31–33
-> were repurposed from earlier placeholder definitions (REPL inspection,
-> `--no-llm`, World AI) to match the actual work done (time advancement,
-> stress testing, immersive text adventure transformation). The original
-> placeholder phases were renumbered accordingly (old 31→34, old 32→34,
-> old 33→35).
+For the binding plan behind this phase list, see
+[`chronicle-v2-pivot-spec.md`](./chronicle-v2-pivot-spec.md).
 
 ---
 
-## Phase 26 — Stability & Persistence Validation (in progress)
+## Phase 34 — v2 doc pivot
 
 | Sub | Goal | Acceptance test | Status |
 |---|---|---|---|
-| **26.A** | Snapshot+Restore preserves every field `core.WorldHash` covers | `TestSaveLoadRoundTrip` (hash_before==hash_after) | 🔧 done |
-| **26.B** | Live event/memory log stays bounded | `TestTrimEvents_*` + `TestTrimMemories_*` | 🔧 done (FIFO fix this session) |
-| **26.C** | 10 seeds × 200 years all hash-match the seed-anchored replay | `TestStressReplay` (new) | ⬜ not started |
-| **26.D** | 5-Generation test finishes in < 10 minutes (CourtAction perf) | `TestFiveGenerationSimulation` under timeout | ⬜ not started |
-| **26.E** | Engines iterate maps in sorted order (eliminate latent non-determinism) | `TestSortedPeople_*` + `TestEconomyEngine_*` | 🔧 done |
-
-## Phase 27 — Doc consolidation
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **27** | One canonical ARCHITECTURE.md (this work) | README links to ARCHITECTURE.md; `chronicle-spec.md` deleted; ARCHITECTURE.md contains all spec content | 🔧 done (this session) |
-
-## Phase 28 — REPL help
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **28** | `> help` prints the 12 verbs + meta-commands | `TestREPL_Help` | ✅ done |
-
-## Phase 29 — `chronicle new <name>`
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **29** | `chronicle new <name> --pack frontier --seed X` creates a working world with one command | `TestNewCmd_CreatesWorld` | ✅ done |
-
-## Phase 30 — Player lineage on death
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **30** | Auto-succession + 5 continuation modes (Heir/Family/Character/Observer/End Bloodline) + legacy record on death | `TestLineageTransfer` | ✅ done |
-| **30.1** | Lineage end-to-end playtest (5 tests: heir/successors/observer/end_bloodline/no-candidates) | `TestLineagePlaytest_*` | ✅ done |
-
-## Phase 31 — Action-duration time advancement
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **31** | Travel/sleep/walk advance simulation ticks via full tick pipeline (SetTickFn). Phase 31 wires the per-tick callback so player actions trigger the same world evolution as auto-tick. | `TestTravelAdvancesTicks`, `TestSleepAdvancesTicks` | ✅ done |
-
-## Phase 32 — 10-seed stress test + determinism audit
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **32** | 10 seeds × 200 years, all hash-match replay. Determinism audit of engine iteration order, RNG streams, and retention caps. | `TestStressReplay` | ✅ done |
-
-## Phase 33 — Immersive text adventure transformation
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **33** | Reshape Chronicle from a simulation dashboard into a living fantasy world. Overhaul narrator (second-person sensory), add adventure verbs (search, pray, status), expand worldpack (7 locations, 30+ buildings, 8 landmarks, 8 trade routes), rewrite help text. | Build + all tests pass | ✅ done |
-| **33.1** | Update README.md to reflect immersive text adventure vision | README rewrite | ✅ done |
-| **33.2** | Wire BuildLocationGossip and BuildPersonGossip into conversation system. NPCs now respond with what they know when asked about places or people. Word-boundary matching via nameMatch helper. | `go build` + `go vet` clean | ✅ done |
-| **33.3** | Update all narrator template renderers (tplLook, tplTalk, tplTravel, tplDeath, tplBirth, tplFirstMeet, tplTime, tplInventory) to immersive second-person voice. Fix NPCActivity pronoun clashes. Gendered pronouns (He/She/They, his/her/their). | All narrator + repl tests pass | ✅ done |
-| **33.4** | Make resolveStatus produce immersive narrative output (LLM-first character journal). Replace simulation dashboard character sheet with flowing prose. | All action tests pass | ✅ done |
-| **33.5** | Extract duplicated gendered pronoun logic into pronounSubject, pronounPossessive, genderNoun helpers. | All tests pass unchanged | ✅ done |
-
-## Phase 34 — `--no-llm` flag
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **34** | Disable LLM entirely (template + rule parser only) | `TestNoLLM` | ⬜ not started |
-
-## Phase 35 — World AI (weekly)
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **35** | Asynchronous rumor/legend/religious-text generation on a weekly tick | `TestWorldAI_GeneratesRumors` | ⬜ not started |
-
-## Phase 34 — LLM cache
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **34** | Cache key per spec §11.3, hit-rate > 0% in a 100-tick run | `TestLLMCache` | ⬜ not started |
-
-## Phase 35 — XDG world directory
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **35** | `~/.local/share/chronicle/worlds/<id>/` layout, `metadata.yaml`, `config.yaml` | `TestXDGPath` | ⬜ not started |
-
-## Phase 36 — `chronicle branch` / `chronicle switch` / `chronicle timeline` CLI
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **36** | Top-level subcommands (currently REPL-only for branch/switch) | `TestBranchCmd`, `TestSwitchCmd`, `TestTimelineCmd` | ⬜ not started |
-
-## Phase 37 — `chronicle export` / `chronicle import`
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **37** | World archive round-trip | `TestExportImport` | ⬜ not started |
-
-## Phase 38 — SQLite test deadlock fix
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **38** | `TestResume_EngineUsesRestoredRules` under 60s (one-liner: `db.SetMaxOpenConns(1)` on test DBs) | `TestResume_EngineUsesRestoredRules` passes under 60s | ⬜ not started |
-
-## Phase 39 — `chronicle list` / `chronicle delete` / `chronicle pack list`
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **39** | World + pack registry commands | `TestListCmd`, `TestDeleteCmd`, `TestPackListCmd` | ⬜ not started |
-
-## Phase 40 — Final v1 acceptance run
-
-| Sub | Goal | Acceptance test | Status |
-|---|---|---|---|
-| **40** | All 9 Definition-of-Done items green + manual smoke test (start as nobody in Blackwater, play for 50 years, have an heir) | `make test` passes; manual playthrough works end-to-end | ⬜ not started |
+| **34** | Documentation pivoted from v1 simulation spec to v2 branching-adventure spec. ARCHITECTURE.md, README.md, PHASES.md rewritten; SIMULATION_TICK_SPEC.md deleted; docs/DETERMINISM.md stubbed; chronicle-v2-pivot-spec.md added. Single atomic commit pushed to `origin/main`. No code changes. | `git log -1` on `origin/main` shows the Phase 34 commit message per `chronicle-v2-pivot-spec.md §8.2`. All pre-commit verification items in spec §8.4 pass. | 🔧 done (this session) |
 
 ---
 
-## Suggested next 3 phases (after this commit lands)
+## Phase 35 — v1 engine retirement
 
-1. **Phase 38 (SQLite test fix).** Trivial one-liner: `db.SetMaxOpenConns(1)` in the test DB. Catches a latent test-infrastructure bug; unblocks the `cmd/chronicle` test suite.
-2. **Phase 30 (Player lineage on death).** The big one for "die and continue" — auto-succession with the 5 continuation modes (Heir/Family/Character/Observer/End Bloodline) and the legacy record on death.
-3. **Phase 31 (REPL relationship/memory inspection).** `relations <name>` and `memories <name>` commands so the player can see the social graph they're building.
+Retire the v1 simulation packages from the codebase. Per decision
+**D4** in the pivot spec, the simulation engines (Population,
+Relationship, Marriage, Memory, Goal, Economy, Event) and the LLM
+stack are no longer part of the Chronicle design.
 
-After those three, the path to "playable v1" is:
-- Phase 32 (`--no-llm`)
-- Phase 26.D (CourtAction perf — unblocks the v1 acceptance suite)
-- Phase 40 (final acceptance)
+| Sub | Goal | Acceptance test | Status |
+|---|---|---|---|
+| **35.A** | `internal/simulation` deleted. All 7 engines removed. Tests for those engines removed. | `rm -rf internal/simulation`; `go build ./...`; `go test ./...` |
+| **35.B** | `internal/llm`, `internal/narrator`, `internal/intent` deleted. The `OPENCODE_ZEN_API_KEY` flow stops being referenced anywhere. | `grep -r OPENCODE_ZEN .` returns nothing in `*.go` |
+| **35.C** | `internal/repl` slimmed to a story-node-renderer shell (no free-text REPL, no intent parser). May eventually be replaced by `internal/ui`. | REPL only renders nodes and selects from authored choices. |
+| **35.D** | `internal/worldpack` slimmed to nothing — the worldpack is no longer the unit of genre. Engine reads authored content from `content/` directly. | `rm -rf internal/worldpack` once the loader lives in `internal/content/loader.go`. |
+| **35.E** | `internal/lineage` and `internal/simulation/legacy` deleted. Lineage transfer is not part of v2. | `grep -r lineage .` returns nothing in `*.go`. |
+| **35.F** | `internal/tick` deleted. There is no tick loop in v2. | `rm -rf internal/tick`. RNG helpers (EntityRand, TickRand) are gone. |
 
-## Status after Phase 33
+---
 
-The user can now play an immersive text adventure:
+## Phase 36 — v2 module scaffold
 
-```bash
-./chronicle new mygame --seed 42 -repl
-> look                        # atmospheric scene description
-> walk                         # interactive destination picker (buildings with → prefix)
-> walk to the inn              # building exploration with unique atmospherics
-> talk elena                   # NPC speaks in character, shares gossip
-> tell me about millbrook      # NPC shares what they know about the place
-> search                       # atmospheric search results
-> pray                         # temple detection, seasonal reflection
-> status                       # immersive narrative character journal
-> inspect marcus               # rich person description
-> listen                       # ambient sounds and overheard conversations
-> travel millbrook             # journey narration with terrain, encounters, weather
-> inventory                    # immersive inventory check
-> time                         # seasonal/time description
-> save                         # save your world
-> quit                         # leave the world
-```
+Stand up the v2 module tree per `ARCHITECTURE.md §22` and README's
+Project Layout v2 target.
 
-…and resume later with `./chronicle resume mygame.db -repl`.
+| Sub | Goal | Acceptance test | Status |
+|---|---|---|---|
+| **36.A** | `internal/engine/` created. `runner.go` implements the §23 Runtime Flow (Load Save → Load Node → Evaluate Conditions → Render Story → Render Choices → Player Selection → Apply Effects → Check Events → Load Next Node). | `internal/engine` compiles; smoke test runs a 3-node story to completion. |
+| **36.B** | `internal/story/` created. `nodes.go` defines the `StoryNode` type. `choices.go` defines the `Choice` type. `conditions.go` defines the `Condition` interface and all concrete condition types (`Flag`, `VariableGE`, `RelationshipGE`, `HasItem`, `HasEnding`, etc.). `effects.go` defines the `Effect` interface and all concrete effect types (`SetFlag`, `ClearFlag`, `ModifyVariable`, `ModifyRelationship`, `ModifyReputation`, `AddItem`, `RemoveItem`, `TriggerEvent`, etc.). | All types match `ARCHITECTURE.md §4–§8` verbatim. |
+| **36.C** | `internal/state/` created. `world.go` defines `WorldState` (§4). `save.go` defines `SaveGame` (§18) and the JSON marshal/unmarshal. | Save/load round-trip preserves all fields (`TestSaveLoadRoundTrip`). |
+| **36.D** | `internal/events/` and `internal/endings/` created. `internal/events/events.go` triggers authored events when their conditions match. `internal/endings/endings.go` evaluates endings in priority order and returns the highest-valid ending. | Triggered events fire deterministically; ending evaluation is deterministic. |
+| **36.E** | `internal/content/loader.go` reads YAML content. Fail-fast on any reference error (broken node ID, missing companion YAML, etc.). | Tests on broken content fail with a clear error message, no silent divergence. |
+| **36.F** | `internal/ui/cli.go` renders the choice menu and reads choice selection (numeric input only). No free-text interpretation. | V2 CLI smoke test passes. |
+
+---
+
+## Phase 37 — Content YAML schema
+
+Define the on-disk YAML format for everything in §21 Content Pipeline.
+This phase is design + spec, not authoring. Authoring is Phase 38.
+
+| Sub | Goal | Acceptance test | Status |
+|---|---|---|---|
+| **37.A** | Story node YAML spec. Required fields (`id`, `title`, `text`, `choices`, `events`). Optional fields. Example in `docs/story-node-yaml.md`. | `internal/story/nodes.go` parses a canonical example. |
+| **37.B** | Choice / Effect / Condition YAML spec. Same shape as the Go types. Example in `docs/choice-yaml.md`. | `internal/story/choices.go` and `internal/story/conditions.go` and `internal/story/effects.go` parse canonical examples. |
+| **37.C** | Relationship / Reputation / Inventory / Item YAML spec. The `Relationship` struct (§9), `ReputationState` struct (§11), `Inventory` struct (§12). | Loaders parse canonical examples. |
+| **37.D** | Character profile YAML spec. The `CharacterProfile` struct (§15) — `name`, `starting_flags`, `starting_variables`, `starting_inventory`, `exclusive_nodes`. | Loaders parse canonical examples. |
+| **37.E** | Ending YAML spec. The `Ending` struct (§19) — `id`, `priority`, `conditions`. | Loader parses canonical examples; ending evaluation returns the highest-valid ending. |
+| **37.F** | Content addressing. Each YAML is hashed at load. Mismatched content is a hard error. | `internal/content/loader.go` exposes `ContentHash(name string) string`. |
+
+---
+
+## Phase 38 — Content authoring
+
+Write the actual story. Aspirational first cut: 5 acts ≥ 150 nodes,
+≥ 300 choices, 12 endings reachable, all 4 protagonists playable, all
+3 romance routes reachable.
+
+| Sub | Goal | Acceptance test | Status |
+|---|---|---|---|
+| **38.A** | Four protagonist YAMLs in `content/protagonists/`: Kael, Lyra, Raven, Aria. Each with a unique opening node and a small `ExclusiveNodes` set. | The character-select screen presents all 4. Each protagonist can be picked and reaches the Act 1 opening. |
+| **38.B** | Companion YAMLs in `content/companions/`: Elara, Selene, Orion, plus the wider cast needed to populate relationship-driven events in Acts 1–2. | Trust/Affection deltas work. The Trust ≥ 50 / Affection ≥ 75 / Trust ≤ −50 scenes for Elara are authored (see §10 Relationship Events). |
+| **38.C** | Acts 1 + 2 authored (20 + 50 = 70 nodes minimum). The Dragon Relic quest (Act 1) and the ally-gathering arc (Act 2) are complete and playtested for each of the 4 protagonists. | A playthrough of "pick protagonist → reach end of Act 2" succeeds for all 4 protagonists. |
+| **38.D** | Acts 3–5 authored (40 + 50 + 20 = 110 nodes). The Void Dragon reveal (Act 3), the war (Act 4), the finale (Act 5) are complete. | A full playthrough from start to a v2 ending succeeds. |
+| **38.E** | `content/endings.yaml` (12 endings per §20). Endings are reachable from a believable playthrough. Some are only reachable from specific protagonists. | `TestAllEndingsReachable` passes (a graph search from each protagonist's start confirms every ending is reachable). |
+| **38.F** | Romance routes wired end-to-end. Elara / Selene / Orion romance endings reachable if the romance conditions (§10) are met by the time the player hits the finale. | A playthrough that meets the romance conditions for each of the three targets lands on the corresponding romance ending. |
+
+---
+
+## Phase 39 — Save/load
+
+Implement the JSON persistence per §18 and §18A. Drop SQLite.
+
+| Sub | Goal | Acceptance test | Status |
+|---|---|---|---|
+| **39.A** | `SaveGame` JSON schema (per §18 + §18A invariants). Canonical JSON encoding (sorted keys, normalized numbers) so that byte-stable round-trip is achievable. | `TestSaveLoadRoundTrip`: pre-save `WorldHash` equals post-load `WorldHash`. |
+| **39.B** | Versioning framework. The save's `Version` field gates load-time migration. No silent migration. | An old-version save refuses to load with a clear error message. A new-version save loads fine. |
+| **39.C** | `save` CLI subcommand. `./chronicle save -out myrun.json` writes a `SaveGame` to disk at the current world state. | Manual smoke test. |
+| **39.D** | `resume` CLI subcommand. `./chronicle resume myrun.json` rehydrates the world from disk and drops the player at `WorldState.CurrentNodeID`. | Manual smoke test. |
+| **39.E** | `info` and `diff` subcommands. Read-only inspection and comparison of two `.json` saves. | Manual smoke test. |
+| **39.F** | Drop `modernc.org/sqlite` from `go.mod` and `go.sum`. The SQLite persistence layer (`internal/persistence`) is deleted along with the world-AI weekly generation artefacts. | `go mod tidy` + `grep sqlite .` returns no `.go` references. |
+
+---
+
+## Phase 40 — v2 acceptance
+
+The v2 Definition of Done, lifted from `ARCHITECTURE.md §25`:
+
+- [ ] Four protagonists implemented
+- [ ] Five acts written
+- [ ] Minimum 150 story nodes
+- [ ] Minimum 300 choices
+- [ ] Minimum 12 endings
+- [ ] Romance routes implemented
+- [ ] Save/load works
+- [ ] All node references validate
+- [ ] No AI dependency exists
+- [ ] Full playthrough possible from start to finish
+
+| Sub | Goal | Acceptance test | Status |
+|---|---|---|---|
+| **40.A** | All 10 Definition-of-Done items green. | Manual + integration suite check. |
+| **40.B** | Manual playthrough walkthrough. Each protagonist plays from start to a v2 ending. | One-by-one playthroughs, signed off in `PHASES.md`. |
+| **40.C** | Test gates: each of the 4 protagonists can reach at least one romance ending AND at least one non-romance ending. Romance variants of the 12 endings are reachable. | `TestProtagonistCoverage` + `TestEndingCoverage`. |
+| **40.D** | Test gates: every condition in `internal/story/conditions.go` is exercised by at least one authored node. Every effect in `internal/story/effects.go` is exercised by at least one authored choice. | `TestConditionCoverage` + `TestEffectCoverage`. |
+| **40.E** | Test gates: a malformed or tampered save fails to load with a clear error message. | `TestSaveLoadResilience`. |
+
+---
+
+## Post-Pivot Backlog
+
+Not phases per se — open items captured by the pivot spec (§12) that
+need decisions before their owning phase can start:
+
+- [ ] Pick final org/repo name (currently `github.com/chronicle-dev/chronicle`).
+- [ ] Pick license (currently TBD).
+- [ ] Decide whether the `cmd/chronicle` entry point stays or moves to a v2 path.
+- [ ] Decide whether `internal/repl` is fully deleted in Phase 35.C or kept as a terminal-only shell that hands off to the v2 choice renderer.
+- [ ] Decide whether `content/` is single-folder or per-act subfolders (the pivot spec adopted the per-act subfolders layout; revisit if authoring suggests otherwise).
+- [ ] Decide whether the saved `.json` files are human-readable pretty-printed or compact. Spec calls for canonical sorted-key encoding, but readability is a separate dimension.
+
+## Suggested next phase after Phase 34 lands
+
+**Phase 35 — v1 engine retirement**. The highest-leverage next step.
+Once the v1 packages are deleted, Phase 36's v2 scaffold lands on a
+clean tree. Phase 37's YAML schema can then be designed and tested
+against a v2 runnable engine in Phase 38. Phase 39's save/load and
+Phase 40's acceptance run close out the v2 cut.
