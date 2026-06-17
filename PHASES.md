@@ -55,7 +55,7 @@ Project Layout v2 target.
 | **36.C** | `internal/state/` created. `world.go` defines `WorldState` (§4). `save.go` defines `SaveGame` (§18) and the JSON marshal/unmarshal. | Save/load round-trip preserves all fields (`TestSaveLoadRoundTrip`). | ✅ done |
 | **36.D** | `internal/events/` and `internal/endings/` created. `internal/events/events.go` triggers authored events when their conditions match. `internal/endings/endings.go` evaluates endings in priority order and returns the highest-valid ending. | Triggered events fire deterministically; ending evaluation is deterministic. | ✅ done |
 | **36.E** | `internal/content/loader.go` reads YAML content. Fail-fast on any reference error (broken node ID, missing companion YAML, etc.). | Tests on broken content fail with a clear error message, no silent divergence. | ✅ done |
-| **36.F** | `internal/ui/cli.go` renders the choice menu and reads choice selection (numeric input only). No free-text interpretation. | V2 CLI smoke test passes. |
+| **36.F** | `internal/ui/cli.go` renders the choice menu and reads choice selection (numeric input only). No free-text interpretation. | V2 CLI smoke test passes. | ✅ done |
 
 ---
 
