@@ -938,8 +938,6 @@ nodes:
       - id: "claim_dragon_kinship"
         text: "Offer kinship to the void dragon."
         next_node_id: "act3.claim_dragon_alliance"
-        conditions:
-          - flag: "saw_void_dragon"
       - id: "claim_kingdoms_throne"
         text: "Take the kingdom's throne."
         next_node_id: "act3.claim_kingdom"
