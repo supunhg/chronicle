@@ -8,9 +8,17 @@ import (
 
 	"github.com/chronicle-dev/chronicle/internal/endings"
 	"github.com/chronicle-dev/chronicle/internal/story"
-
 	"gopkg.in/yaml.v3"
 )
+
+// yamlUnmarshal is a thin alias around yaml.Unmarshal so all
+// internal/content YAML parsing funnels through one entry
+// point. Sits in content (not story / endings) because it is
+// a content-package convenience; it does not introduce any
+// semantic transformation.
+func yamlUnmarshal(data []byte, v any) error {
+	return yaml.Unmarshal(data, v)
+}
 
 // Loaded bundles every artifact parsed from a content
 // directory. Construction is fail-fast: any missing file or
@@ -64,11 +72,6 @@ type Companion struct {
 // See package doc for the canonical file layout. Load is
 // fail-fast; the returned error names the file whose content
 // failed or the cross-reference that broke.
-//
-// Empty/nil Loaded fields are valid: an authored world with
-// no events or no endings will produce zero-length slices
-// rather than nil (so callers can `len(loaded.Events)` without
-// defence).
 func Load(dir string) (*Loaded, error) {
 	if dir == "" {
 		return nil, errors.New("content: Load: empty content directory path")
@@ -138,7 +141,6 @@ func Load(dir string) (*Loaded, error) {
 		Endings:      endingsList,
 		Protagonists: protagonists,
 	}
-	// Normalise nil to zero-length so len() works as expected.
 	if loaded.Events == nil {
 		loaded.Events = []story.Event{}
 	}
@@ -157,11 +159,27 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// ----- nodes.yaml -----
+// ----- nodes.yaml / events.yaml / endings.yaml -----
+//
+// Per PHASES.md §37.A + §37.B the canonical "one parser per
+// file type, in the package that owns the return type" rule
+// applies:
+//
+//   - nodes.yaml  -> internal/story/yaml.go::LoadStoryNodes
+//   - events.yaml -> internal/story/yaml.go::EventsFromYAML
+//   - endings.yaml -> internal/endings/yaml.go::EndingsFromYAML
+//
+// The content package owns ONLY file I/O + cross-reference
+// validation; each read*() function is a thin wrapper around
+// the canonical parser. Condition dispatch is funneled through
+// story.UnmarshalCondition (single key-map polymorphism).
+//
+// EndingsFromYAML lives in internal/endings (not story) to
+// avoid the import cycle `content -> endings -> story ->
+// endings`; see PHASES.md §37.B import-cycle fix.
 
 // readNodes delegates the YAML→StoryNode translation to
-// internal/story.LoadStoryNodes (the canonical schema parser
-// per PHASES.md §37.A). readNodes owns only the file I/O.
+// internal/story.LoadStoryNodes.
 func readNodes(path string) ([]story.StoryNode, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -174,88 +192,34 @@ func readNodes(path string) ([]story.StoryNode, error) {
 	return nodes, nil
 }
 
-// ----- events.yaml -----
-
-type eventDoc struct {
-	Events []yamlEvent `yaml:"events"`
-}
-
-type yamlEvent struct {
-	ID         string           `yaml:"id"`
-	NodeID     string           `yaml:"node_id"`
-	Conditions []map[string]any `yaml:"conditions,omitempty"`
-}
-
+// readEvents delegates the YAML→Event translation to
+// internal/story.EventsFromYAML.
 func readEvents(path string) ([]story.Event, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("content: readEvents: %s: %w", path, err)
 	}
-	var doc eventDoc
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("content: readEvents: parse %s: %w", path, err)
+	events, err := story.EventsFromYAML(raw)
+	if err != nil {
+		return nil, fmt.Errorf("content: readEvents: %s: %w", path, err)
 	}
-	out := make([]story.Event, 0, len(doc.Events))
-	for i, ye := range doc.Events {
-		if ye.ID == "" {
-			return nil, fmt.Errorf("content: readEvents: %s event[%d] has empty id", path, i)
-		}
-		ev := story.Event{
-			ID:     ye.ID,
-			NodeID: ye.NodeID,
-		}
-		for j, raw := range ye.Conditions {
-			cond, err := story.UnmarshalCondition(raw)
-			if err != nil {
-				return nil, fmt.Errorf("content: readEvents: %s event[%d] %q condition[%d]: %w", path, i, ye.ID, j, err)
-			}
-			ev.Conditions = append(ev.Conditions, cond)
-		}
-		out = append(out, ev)
-	}
-	return out, nil
+	return events, nil
 }
 
-// ----- endings.yaml -----
-
-type endingDoc struct {
-	Endings []yamlEnding `yaml:"endings"`
-}
-
-type yamlEnding struct {
-	ID         string           `yaml:"id"`
-	Priority   int              `yaml:"priority"`
-	Conditions []map[string]any `yaml:"conditions,omitempty"`
-}
-
+// readEndings delegates the YAML→endings.Ending translation to
+// the canonical parser in internal/endings. EndingsFromYAML
+// lives in its own return-type package to avoid the cycle
+// `content → endings → story → endings`; see PHASES.md §37.B.
 func readEndings(path string) ([]endings.Ending, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("content: readEndings: %s: %w", path, err)
 	}
-	var doc endingDoc
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("content: readEndings: parse %s: %w", path, err)
+	ens, err := endings.EndingsFromYAML(raw)
+	if err != nil {
+		return nil, fmt.Errorf("content: readEndings: %s: %w", path, err)
 	}
-	out := make([]endings.Ending, 0, len(doc.Endings))
-	for i, ye := range doc.Endings {
-		if ye.ID == "" {
-			return nil, fmt.Errorf("content: readEndings: %s ending[%d] has empty id", path, i)
-		}
-		en := endings.Ending{
-			ID:       ye.ID,
-			Priority: ye.Priority,
-		}
-		for j, raw := range ye.Conditions {
-			cond, err := story.UnmarshalCondition(raw)
-			if err != nil {
-				return nil, fmt.Errorf("content: readEndings: %s ending[%d] %q condition[%d]: %w", path, i, ye.ID, j, err)
-			}
-			en.Conditions = append(en.Conditions, cond)
-		}
-		out = append(out, en)
-	}
-	return out, nil
+	return ens, nil
 }
 
 // ----- protagonists.yaml -----
@@ -279,7 +243,7 @@ func readProtagonists(path string) ([]Protagonist, error) {
 		return nil, fmt.Errorf("content: readProtagonists: %s: %w", path, err)
 	}
 	var doc protagonistsDoc
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
+	if err := yamlUnmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("content: readProtagonists: parse %s: %w", path, err)
 	}
 	seen := make(map[string]bool, len(doc.Protagonists))
@@ -321,7 +285,7 @@ func readCompanions(path string) (map[string]Companion, error) {
 		return nil, fmt.Errorf("content: readCompanions: %s: %w", path, err)
 	}
 	var doc companionsDoc
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
+	if err := yamlUnmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("content: readCompanions: parse %s: %w", path, err)
 	}
 	out := make(map[string]Companion, len(doc.Companions))
@@ -342,9 +306,6 @@ func readCompanions(path string) (map[string]Companion, error) {
 
 // ----- Validation -----
 
-// validateNodeReferences ensures every Choice.NextNodeID
-// resolves to a Node.ID. This is the "no broken node
-// references" gate from ARCHITECTURE.md §24.
 func validateNodeReferences(nodes []story.StoryNode) error {
 	known := make(map[string]bool, len(nodes))
 	for _, n := range nodes {
@@ -363,9 +324,6 @@ func validateNodeReferences(nodes []story.StoryNode) error {
 	return nil
 }
 
-// validateTriggerEventIDs ensures every TriggerEvent effect's
-// ID is present in the events registry. This is the "no
-// dangling event references" gate from PHASES.md §36.E.
 func validateTriggerEventIDs(nodes []story.StoryNode, events []story.Event) error {
 	knownEvents := make(map[string]bool, len(events))
 	for _, e := range events {
@@ -390,11 +348,6 @@ func validateTriggerEventIDs(nodes []story.StoryNode, events []story.Event) erro
 	return nil
 }
 
-// validatePartyCompanions ensures every Protagonist's
-// starting_party is consistent with the supplied
-// companions.yaml. A protagonist with empty starting_party
-// is valid without companions.yaml (the player's party starts
-// empty).
 func validatePartyCompanions(protagonists []Protagonist, companions map[string]Companion) error {
 	for _, p := range protagonists {
 		if len(p.StartingParty) == 0 {
