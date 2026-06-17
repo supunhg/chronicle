@@ -222,6 +222,128 @@ func (r recordProvider) Select(_ story.StoryNode, available []story.Choice, _ st
 	return r(available), nil
 }
 
+// TestRunner_EventRedirectOverridesNextNodeID verifies the
+// Phase 36.D wiring: a Choice whose Effects queue a
+// TriggerEvent takes the player to the EVENT's NodeID, not
+// the Choice's NextNodeID. The queue is cleared after the
+// Step; the TriggerEvent effect that queued the redirect
+// itself is observable via WorldState.TriggeredEvents being
+// empty in the post-Step state.
+//
+// Graph shape:
+//
+//	a (1 choice) --[Choice a1 (TriggerEvent "ally_call")]--> b
+//	                  but Event "ally_call" redirects to "c"
+//
+// Step a → c (NOT b). Tick reflects the Step. TriggeredEvents
+// is empty post-Step.
+func TestRunner_EventRedirectOverridesNextNodeID(t *testing.T) {
+	g := story.NewGraph()
+	if err := g.Add(story.StoryNode{
+		ID: "a", Text: "Hero needs an ally.",
+		Choices: []story.Choice{
+			{
+				ID: "a1", Text: "Call for an ally.",
+				NextNodeID: "b", // would normally land on b
+				Effects: []story.Effect{
+					story.TriggerEvent{ID: "ally_call"},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Add(story.StoryNode{ID: "b", Text: "Should NOT land here."}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Add(story.StoryNode{ID: "c", Text: "Ally arrives."}); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &Runner{
+		Graph: g,
+		Engine: &Engine{
+			Renderer: ui.NewBufferRenderer(&bytes.Buffer{}),
+			ChoiceProvider: NewScripted([]story.Choice{
+				{ID: "a1"}, // NextNodeID ignored by scriptedProvider
+			}),
+			Events: []story.Event{
+				// "ally_call" redirects to c, overriding a1->b.
+				{ID: "ally_call", NodeID: "c"},
+			},
+		},
+	}
+	ws := state.NewWorldState()
+	ws.CurrentNodeID = "a"
+	s := state.SaveGame{Version: 0, WorldState: ws}
+
+	s2, err := runner.Step(s)
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if s2.WorldState.CurrentNodeID != "c" {
+		t.Fatalf("after Step: CurrentNodeID = %q, want c (event redirect)", s2.WorldState.CurrentNodeID)
+	}
+	if len(s2.WorldState.TriggeredEvents) != 0 {
+		t.Errorf("after Step: TriggeredEvents = %v, want empty (queue cleared)", s2.WorldState.TriggeredEvents)
+	}
+	if s2.WorldState.Tick != 1 {
+		t.Errorf("after Step: Tick = %d, want 1", s2.WorldState.Tick)
+	}
+}
+
+// TestRunner_NoEventMatch_FallsBackToNextNodeID verifies the
+// "TriggerEvent with no matching registry entry is silently
+// skipped, queue still cleared, Choice.NextNodeID is used"
+// path. The queue contains an ID the registry doesn't know
+// about; Trigger returns ("", nil); Runner uses
+// chosen.NextNodeID as normal.
+func TestRunner_NoEventMatch_FallsBackToNextNodeID(t *testing.T) {
+	g := story.NewGraph()
+	if err := g.Add(story.StoryNode{
+		ID: "a", Text: "Quiet node.",
+		Choices: []story.Choice{
+			{
+				ID: "a1", Text: "Continue.",
+				NextNodeID: "b",
+				Effects: []story.Effect{
+					story.TriggerEvent{ID: "no_such_event"},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Add(story.StoryNode{ID: "b", Text: "Continue."}); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &Runner{
+		Graph: g,
+		Engine: &Engine{
+			Renderer:       ui.NewBufferRenderer(&bytes.Buffer{}),
+			ChoiceProvider: NewScripted([]story.Choice{{ID: "a1"}}),
+			// Empty registry: unknown event ID is silently
+			// skipped by Phase 36.D's events.Trigger.
+			Events: nil,
+		},
+	}
+	ws := state.NewWorldState()
+	ws.CurrentNodeID = "a"
+	s := state.SaveGame{Version: 0, WorldState: ws}
+
+	s2, err := runner.Step(s)
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if s2.WorldState.CurrentNodeID != "b" {
+		t.Fatalf("after Step: CurrentNodeID = %q, want b (no event match, Choice.NextNodeID used)", s2.WorldState.CurrentNodeID)
+	}
+	if len(s2.WorldState.TriggeredEvents) != 0 {
+		t.Errorf("after Step: TriggeredEvents = %v, want empty (queue cleared)", s2.WorldState.TriggeredEvents)
+	}
+}
+
 // TestRunner_DefaultEndingFallback verifies the §19 "no
 // Conditions" implicit-default pattern: an Ending with empty
 // Conditions is always valid and wins when no higher-priority

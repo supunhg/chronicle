@@ -43,6 +43,21 @@ type Engine struct {
 	// ending to the player (Phase 36.F ui/cli.go will integrate
 	// it). Tests may leave it nil.
 	OnFinale func(e endings.Ending, ws state.WorldState)
+
+	// Events is the registry of authored events Step feeds to
+	// Phase 36.D's internal/events.Trigger after applying the
+	// chosen Choice's Effects. empty/nil Events is a valid
+	// configuration: Trigger consumes-and-clears the
+	// TriggeredEvents queue, but with no registry there are
+	// no matches and the queue is cleared without producing
+	// a redirect.
+	//
+	// Phase 38 may add it as StoryNode.Events merge (node-level
+	// events), but for Phase 36.D the world-level TriggerEvent
+	// effect queue is the only source. The merged registry is
+	// passed in here at Engine construction time. Phase 36.E
+	// wires it from content/events.yaml.
+	Events []story.Event
 }
 
 // ChoiceProvider abstracts "how does the runner read the player's

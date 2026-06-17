@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/chronicle-dev/chronicle/internal/endings"
+	"github.com/chronicle-dev/chronicle/internal/events"
 	"github.com/chronicle-dev/chronicle/internal/state"
 	"github.com/chronicle-dev/chronicle/internal/story"
 )
@@ -43,11 +44,16 @@ type Runner struct {
 //	5. Ask Engine.ChoiceProvider.Select for the player's pick.
 //	6. Apply each Effect of the chosen Choice in declaration order.
 //	   First non-nil error stops Step (no rollback — Phase 36.A).
-//	7. Update WorldState.CurrentNodeID to Choice.NextNodeID.
-//	8. Increment WorldState.Tick (debug counter).
-//	9. If the new node has IsFinal=true, evaluate Engine.Endings
-//	   and append the recovered ending ID to EndingsUnlocked.
-//	   OnFinale callback is invoked if non-nil.
+//	7. Phase 36.D: fire any events queued by TriggerEvent
+//	   effects in step 6. events.Trigger consumes-and-clears
+//	   ws.TriggeredEvents and returns a redirect NodeID (first
+//	   matching event in queue order wins, per §13).
+//	8. Update WorldState.CurrentNodeID to the event redirect
+//	   (if non-empty), else Choice.NextNodeID.
+//	9. Increment WorldState.Tick (debug counter).
+//	10. If the new node has IsFinal=true, evaluate Engine.Endings
+//	    and append the recovered ending ID to EndingsUnlocked.
+//	    OnFinale callback is invoked if non-nil.
 //
 // Step returns the updated SaveGame and the first error
 // encountered (or nil on success).
@@ -94,15 +100,23 @@ func (r *Runner) Step(s state.SaveGame) (state.SaveGame, error) {
 		}
 	}
 
-	// TODO(phase-36.D): ws.TriggeredEvents (queued by TriggerEvent
-	// effects in the loop above) is consumed-and-cleared by
-	// internal/events (Phase 36.D). If 36.D's handler is absent
-	// or forgets to clear, the queue would re-fire events across
-	// Steps; the contract is documented on
-	// state.WorldState.TriggeredEvents. 36.D must clear the slice
-	// after firing matched events.
+	// Phase 36.D: fire any events queued by TriggerEvent
+	// effects above. events.Trigger consumes-and-clears the
+	// queue (per state.WorldState.TriggeredEvents contract)
+	// and returns a redirect NodeID if a matching event
+	// exists. The redirect overrides chosen.NextNodeID so
+	// the §23 flow's "Check Events → Load Next Node" handoff
+	// is single-codepath.
+	redirectNodeID, err := events.Trigger(&s.WorldState, r.Engine.Events)
+	if err != nil {
+		return s, fmt.Errorf("engine: trigger events: %w", err)
+	}
 
-	s.WorldState.CurrentNodeID = chosen.NextNodeID
+	if redirectNodeID != "" {
+		s.WorldState.CurrentNodeID = redirectNodeID
+	} else {
+		s.WorldState.CurrentNodeID = chosen.NextNodeID
+	}
 	s.WorldState.Tick++
 
 	// If we just landed on a final node, surface an ending.
