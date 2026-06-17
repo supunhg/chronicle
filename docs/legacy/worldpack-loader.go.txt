@@ -1,3 +1,35 @@
+// Snapshot of internal/worldpack/loader.go, captured at the Phase 35.D
+// commit (c5fcb10's successor). This snapshot is preserved in
+// docs/legacy/ as a reference for Phase 36's internal/content/loader.go,
+// per the user's directive in the Phase 35.D request:
+//
+//   "Save the loader logic (currently in worldpack/loader.go) before
+//    deleting since Phase 36's internal/content/loader.go will need
+//    to read the same YAML format from a content/ directory instead
+//    of a worldpack/ directory."
+//
+// The YAML schema (entities.yaml, factions.yaml, actions.yaml,
+// occupations.yaml, rules.yaml, generation.yaml) is unchanged in v2 —
+// only the directory layout shifts from <pack>/ to content/<file>.yaml.
+// Phase 36 should adapt this code accordingly:
+//
+//   1. Move package worldpack → package content.
+//   2. Replace resolvePackDir's worldpacks/<name> path lookup with a
+//      direct content/ directory read (no walk-up).
+//   3. Replace the six individual Load calls with a single RootDir /
+//      PerActDir convention (content/acts/act1.yaml … act5.yaml,
+//      content/protagonists/<name>.yaml, content/companions/<name>.yaml,
+//      content/endings.yaml).
+//   4. The ResolveDir exported helper is no longer needed — content
+//      lives at a fixed location per PHASES.md §36.E.
+//
+// Do not import this file. Phase 36 should treat this snapshot as
+// reference material only; the actual implementation lives in
+// internal/content/loader.go (created in Phase 36.E).
+//
+// freeze_date: 2026-06-17
+// source_commit: post-Phase 35.D (this snapshot's origin rev).
+
 package worldpack
 
 import (
@@ -43,21 +75,10 @@ type occupationsFile struct {
 // parse; no partial Pack is returned.
 //
 // The first return value is the resolved absolute path that was
-// actually loaded (post-walk-up). Callers that need to read sibling
-// files in the same worldpack (e.g., llm.yaml) should use this path
-// rather than the raw input dir, which may have been CWD-relative
-// and unreachable from the caller's working directory.
+// actually loaded (post-walk-up).
 //
-// The dir argument is resolved via resolvePackDir, which tries:
-//  1. The path as given (CWD-relative or absolute).
-//  2. Relative to the running binary's directory (handles the case
-//     where the user invokes chronicle from any working directory).
-//  3. A walk-up from CWD looking for a worldpacks/frontier sibling
-//     (handles the case where the user is in a subdirectory of the
-//     project root).
-//
-// Without this fallback, `chronicle new` only works when invoked
-// from the project root — a friction point for v1 playability.
+// Phase 36 note: Replace this with the v2 content loader. The YAML
+// schema (Region, Locations, etc.) is unchanged.
 func Load(dir string) (string, *Pack, error) {
 	resolved, err := resolvePackDir(dir)
 	if err != nil {
@@ -109,31 +130,18 @@ func Load(dir string) (string, *Pack, error) {
 }
 
 // ResolveDir returns the absolute path to the worldpack directory
-// for the given input. Exported wrapper around resolvePackDir so
-// callers that need to read sibling files (e.g., llm.yaml) without
-// loading the whole Pack can still get the walk-up-resolved path.
+// for the given input.
+//
+// Phase 36 note: Drop this. content/ lives at a fixed location.
 func ResolveDir(dir string) (string, error) {
 	return resolvePackDir(dir)
 }
 
 // resolvePackDir tries the given path first, then falls back to
-// binary-relative and walk-up resolutions. This allows `chronicle
-// new` to work from any directory, not just the project root.
+// binary-relative and walk-up resolutions.
 //
-// Resolution order:
-//  1. The path as given (CWD-relative or absolute). If entities.yaml
-//     exists in that directory, use it.
-//  2. Relative to the running binary's directory (../worldpacks/<name>
-//     and ../../worldpacks/<name>). Handles the common case where
-//     the binary lives in the project root and the user invokes it
-//     from a different CWD.
-//  3. Walk up from CWD looking for a worldpacks/<basename> sibling.
-//     Handles the case where the user is inside a subdirectory of
-//     the project (e.g., ./cmd/chronicle during development).
-//
-// Returns the resolved absolute path, or an error if none of the
-// candidates exist. The error message lists what was tried so the
-// user can diagnose a missing pack quickly.
+// Phase 36 note: Drop entirely. The v2 content tree has a fixed
+// location and does not need walk-up resolution.
 func resolvePackDir(dir string) (string, error) {
 	basename := filepath.Base(dir)
 
@@ -168,8 +176,7 @@ func resolvePackDir(dir string) (string, error) {
 }
 
 // isPackDir returns true if path is a directory containing entities.yaml
-// (the canonical worldpack marker file). Used by resolvePackDir to
-// test candidate paths without triggering a full Load.
+// (the canonical worldpack marker file).
 func isPackDir(path string) bool {
 	info, err := os.Stat(path)
 	if err != nil {
