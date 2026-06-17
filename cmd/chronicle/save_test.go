@@ -95,7 +95,7 @@ func TestSave_FromWorldStateFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal worldstate: %v", err)
 	}
-	if err := os.WriteFile(from, wsData, 0644); err != nil {
+	if err := os.WriteFile(from, wsData, 0600); err != nil {
 		t.Fatalf("write -from fixture: %v", err)
 	}
 
@@ -130,6 +130,18 @@ func TestSave_FromWorldStateFile(t *testing.T) {
 	if loaded.Version != state.CurrentVersion {
 		t.Errorf("Version mismatch: got %d want %d",
 			loaded.Version, state.CurrentVersion)
+	}
+
+	// The save file's permission must be 0600 (owner-only RW). Phase 39.C
+	// ships save-privacy-by-default because save files encode romance
+	// targets and faction alignment; chmod'ing to 0644 is intentionally
+	// not what we do.
+	outInfo, err := os.Stat(out)
+	if err != nil {
+		t.Fatalf("stat output: %v", err)
+	}
+	if got := outInfo.Mode().Perm(); got != 0600 {
+		t.Errorf("output permission = %04o; want 0600", got)
 	}
 }
 
@@ -175,7 +187,7 @@ func TestSave_FromFileMalformed(t *testing.T) {
 	dir := t.TempDir()
 	from := filepath.Join(dir, "bad.json")
 	out := filepath.Join(dir, "out.json")
-	if err := os.WriteFile(from, []byte("{ not valid json"), 0644); err != nil {
+	if err := os.WriteFile(from, []byte("{ not valid json"), 0600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
 	stderr, _ := testStderr()
@@ -211,7 +223,7 @@ func TestSave_WorldHashStableAcrossRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if err := os.WriteFile(from, wsData, 0644); err != nil {
+	if err := os.WriteFile(from, wsData, 0600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
 

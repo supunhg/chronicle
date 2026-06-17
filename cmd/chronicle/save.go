@@ -67,7 +67,7 @@ func runSave(argv []string, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("save: marshal: %w", err)
 	}
-	if err := os.WriteFile(*outPath, data, 0644); err != nil {
+	if err := os.WriteFile(*outPath, data, 0600); err != nil {
 		return fmt.Errorf("save: write %q: %w", *outPath, err)
 	}
 
@@ -83,10 +83,14 @@ var errMissingOut = fmt.Errorf("save: -out flag is required")
 
 // loadWorldStateForSave resolves the WorldState backing the save.
 // A blank -from path uses NewWorldState; a populated path reads a
-// JSON file containing a bare WorldState. Map fields are ensured
-// non-nil to satisfy the invariant that "writes to nil maps panic"
-// never happens downstream (NewWorldState's empty init is reused
-// for the -from path so the load-time field population is consistent).
+// JSON file containing a bare WorldState JSON object -- deliberately
+// NOT a SaveGame wrapper, because `resume` (§39.D) is the subcommand
+// that handles SaveGame-with-version files. `save -from` is for
+// bare-WorldState fixtures emitted by Phase-38 YAML loaders and
+// future engine runners. Map fields are ensured non-nil to satisfy
+// the invariant that "writes to nil maps panic" never happens
+// downstream (NewWorldState's empty init is reused for the -from
+// path so the load-time field population is consistent).
 func loadWorldStateForSave(fromPath string, stderr io.Writer) (state.WorldState, error) {
 	if fromPath == "" {
 		return state.NewWorldState(), nil
