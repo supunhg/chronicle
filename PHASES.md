@@ -21,7 +21,7 @@ For the binding plan behind this phase list, see
 
 | Sub | Goal | Acceptance test | Status |
 |---|---|---|---|
-| **34** | Documentation pivoted from v1 simulation spec to v2 branching-adventure spec. ARCHITECTURE.md, README.md, PHASES.md rewritten; SIMULATION_TICK_SPEC.md deleted; docs/DETERMINISM.md stubbed; chronicle-v2-pivot-spec.md added. Single atomic commit pushed to `origin/main`. No code changes. | `git log -1` on `origin/main` shows the Phase 34 commit message per `chronicle-v2-pivot-spec.md §8.2`. All pre-commit verification items in spec §8.4 pass. | 🔧 done (this session) |
+| **34** | Documentation pivoted from v1 simulation spec to v2 branching-adventure spec. ARCHITECTURE.md, README.md, PHASES.md rewritten; SIMULATION_TICK_SPEC.md deleted; docs/DETERMINISM.md stubbed; chronicle-v2-pivot-spec.md added. Single atomic commit pushed to `origin/main`. No code changes. | `git log -1` on `origin/main` shows the Phase 34 commit message per `chronicle-v2-pivot-spec.md §8.2`. All pre-commit verification items in spec §8.4 pass. | ✅ done |
 
 ---
 

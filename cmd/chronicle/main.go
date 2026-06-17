@@ -59,7 +59,6 @@ import (
 	"github.com/chronicle-dev/chronicle/internal/narrator"
 	"github.com/chronicle-dev/chronicle/internal/persistence"
 	"github.com/chronicle-dev/chronicle/internal/repl"
-	"github.com/chronicle-dev/chronicle/internal/simulation"
 	"github.com/chronicle-dev/chronicle/internal/tick"
 	"github.com/chronicle-dev/chronicle/internal/worldpack"
 )
@@ -454,15 +453,7 @@ func runPlay(packDir string, numTicks int, seed int64) (*core.World, error) {
 	// RelationshipEngine so it can call ApplyMemoryDeltas at
 	// memory creation time (the O(1) cached-aggregate pattern per
 	// spec §5.2).
-	popEng := simulation.NewPopulationEngine()
-	relEng := simulation.NewRelationshipEngine()
-	memEng := &simulation.MemoryEngine{RelationshipEngine: relEng}
-	sim := tick.NewSimulation(seed,
-		popEng,
-		relEng,
-		simulation.NewGoalEngine(),
-		memEng,
-	)
+	sim := tick.NewSimulation(seed)
 	if err := sim.Init(w); err != nil {
 		return nil, fmt.Errorf("sim init: %w", err)
 	}
@@ -1240,15 +1231,7 @@ func enterREPL(w *core.World, packDir string) error {
 	// Fresh simulation. The engines are stateless; both this
 	// sim and the one that ran the initial ticks read from and
 	// write to the same world.
-	popEng := simulation.NewPopulationEngine()
-	relEng := simulation.NewRelationshipEngine()
-	memEng := &simulation.MemoryEngine{RelationshipEngine: relEng}
-	sim := tick.NewSimulation(w.Seed,
-		popEng,
-		relEng,
-		simulation.NewGoalEngine(),
-		memEng,
-	)
+	sim := tick.NewSimulation(w.Seed)
 	if err := sim.Init(w); err != nil {
 		return fmt.Errorf("repl: sim init: %w", err)
 	}
@@ -1333,15 +1316,7 @@ func runResume(dbPath string, numTicks int) (*core.World, error) {
 	// → Memory. The MemoryEngine is given a reference to the
 	// RelationshipEngine so it can call ApplyMemoryDeltas for any
 	// new memories created this tick.
-	popEng := simulation.NewPopulationEngine()
-	relEng := simulation.NewRelationshipEngine()
-	memEng := &simulation.MemoryEngine{RelationshipEngine: relEng}
-	sim := tick.NewSimulation(w.Seed,
-		popEng,
-		relEng,
-		simulation.NewGoalEngine(),
-		memEng,
-	)
+	sim := tick.NewSimulation(w.Seed)
 	if err := sim.Init(w); err != nil {
 		return nil, fmt.Errorf("sim init: %w", err)
 	}
