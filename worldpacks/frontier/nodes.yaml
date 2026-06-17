@@ -1,22 +1,44 @@
 # Chronicle v2 — frontier worldpack: nodes
 #
-# Phase 38.A authoring. 14 nodes total:
-#   - 4 protagonist openings (each is that protagonist's first
-#     exclusive_node; routes to the shared act1.ashwick_entrance)
-#   - 1 shared Act 1 opening: act1.ashwick_entrance (verbatim
-#     from docs/story-node-yaml.md §3 canonical fixture so
-#     TestLoadStoryNodes_CanonicalExample still binds)
-#   - 5 downstream continuation nodes (wait_at_square,
-#     greyhall_keep, eastern_ridge, keeper_interview,
-#     void_dragon_reveal, ally_appears_intro)
-#   - 4 deep exclusive scenes (one per protagonist; flagged by
-#     the protagonist's starting_flags — currently unreachable
-#     from the limited Act 1 we author here; reachability lands
-#     in Phase 38.C + §38.E's TestAllEndingsReachable gate)
+# Phase 38.A + §38.B/C authoring. ~43 nodes total:
+#   - 15 from Phase 38.A (preserved verbatim):
+#     4 protagonist openings + 1 shared act1.ashwick_entrance
+#     + 5 downstream continuation + 4 deep exclusives
+#   - 4 Act 1 supplement (this phase):
+#     dragon_relic_in_vault, act1_close_ridge,
+#     mountain_path_begins, aldric_arrival
+#   - ~24 Act 2 scenes (this phase):
+#     5 companion anchor arcs (Selene / Orion / Maren / Aldric /
+#     Harlan), 4 protagonist detours (kael_letter /
+#     lyra_runic_slate / raven_brother / aria_pilgrim_book)
+#     that route to the existing deep exclusives, 2 pathway
+#     connectors, 1 closeup, 1 act3_handoff terminal.
+#
+# Arc structure (§38.C acceptance: each protagonist can reach
+# end-of-Act-2 + each deep exclusive is reachable + 6 companion
+# events fire at anchor encounters):
+#
+#   [Act 1: 19 nodes] -- relic recovered -> mountain path
+#     act2_entry -> mountain_crossing -> selenes_tower
+#     sequence -> pathway_a -> orions_camp sequence ->
+#     pathway_b -> maren_library sequence -> aldric_keep
+#     sequence -> harlan_roadside sequence -> closeup
+#     -> act3_handoff.
+#
+#   Each protagonist's path branches INTO their deep
+#   exclusive_node[1] via a context-relevant detour:
+#     Kael  -> act2.kael_letter   -> kael.scholars_final_chapter
+#     Lyra  -> act2.lyra_runic_slate -> lyra.runic_trial
+#     Raven -> act2.raven_brother  -> raven.heirs_judgment
+#     Aria  -> act2.aria_pilgrim_book -> aria.dawns_first_prayer
+#   Each detour has a condition on the protagonist's
+#   starting_flag, so only that protagonist visits it.
 
 nodes:
 
-  # ---------- 4 protagonist openings (each is exclusive) ----------
+  # ============================================================
+  # SECTION A. Act 1 — preserved verbatim from Phase 38.A
+  # ============================================================
 
   - id: "kael.fringe_searching"
     title: "Prologue I — Kael on the fringe"
@@ -96,8 +118,6 @@ nodes:
           - set_flag: "began_journey"
           - set_flag: "Aria_at_temple"
 
-  # ---------- 1 shared Act 1 opening (canonical fixture) ----------
-
   - id: "act1.ashwick_entrance"
     title: "EX01 — The frontier town of Ashwick"
     text: |
@@ -119,8 +139,6 @@ nodes:
       - id: "wait_watch"
         text: "Wait in the square and watch."
         next_node_id: "act1.wait_at_square"
-
-  # ---------- 5 downstream continuation nodes ----------
 
   - id: "act1.wait_at_square"
     title: "EX01a — Waiting at the square"
@@ -154,6 +172,15 @@ nodes:
       - id: "step_back_out"
         text: "Step back out."
         next_node_id: "act1.ashwick_entrance"
+      # Phase 38.B/C addition: alternative direct route to
+      # Act 2 handoff if the protagonist already has the relic
+      # (rare path, would require entering Ashwick with
+      # relic_claimed set by some external route).
+      - id: "depart_directly"
+        text: "Thank her and leave for the eastern trail."
+        next_node_id: "act1.aldric_arrival"
+        conditions:
+          - flag: "relic_claimed"
 
   - id: "act1.eastern_ridge"
     title: "EX03 — The Eastern Ridge"
@@ -183,9 +210,13 @@ nodes:
       does not need to. She has been expecting someone to walk
       through the keep's door for weeks.
     choices:
+      # Phase 38.B/C: reroute offer_help to the Dragon Relic
+      # vault scene (introduces the relic quest). The keeper's
+      # commission is to retrieve it; the ally_call sidebar
+      # (Elara's arrival) now follows.
       - id: "offer_help"
         text: "Offer to help."
-        next_node_id: "act1.ally_appears_intro"
+        next_node_id: "act1.dragon_relic_in_vault"
         effects:
           - set_flag: "accepted_commission"
           - modify_reputation: { faction: "kingdom", value: 5 }
@@ -210,6 +241,16 @@ nodes:
         next_node_id: "act1.greyhall_keep"
         effects:
           - set_flag: "saw_void_dragon"
+      # Phase 38.B/C addition: the inner chamber IS where
+      # the Dragon Relic sits; traverse into it to recover
+      # the relic and progress the relic quest.
+      - id: "traverse_relic_chamber"
+        text: "Step into the inner chamber."
+        next_node_id: "act1.dragon_relic_in_vault"
+        conditions:
+          - flag: "saw_void_dragon"
+        effects:
+          - set_flag: "void_chamber_entered"
 
   - id: "act1.ally_appears_intro"
     title: "EX06 — An old friend, by chance"
@@ -223,22 +264,499 @@ nodes:
       somewhere — the eastern ridge, perhaps, or a tavern in
       another town, or a story your grandmother told you once.
     choices:
+      # Phase 38.B/C: forward to Act 1's close instead of
+      # looping back to keeper_interview (Phase 38.A reviewer
+      # flagged the loop as a UX trap; the close is the Act 1
+      # terminal that hands the protagonist into Act 2).
       - id: "accept_elara"
         text: "Travel with her."
-        next_node_id: "act1.keeper_interview"
+        next_node_id: "act1.act1_close_ridge"
         effects:
           - set_flag: "recruited_elara"
+          - modify_relationship: { character: "Elara", axis: "trust", value: 25 }
       - id: "decline_elara"
         text: "Decline her company."
         next_node_id: "act1.ashwick_entrance"
 
-  # ---------- 4 deep exclusive scenes (one per protagonist) ----------
-  #
-  # Each is gated by that protagonist's starting_flags (so the
-  # condition is satisfied the moment their world is loaded),
-  # and currently has no upstream author route from the limited
-  # Act 1. Phase 38.C wires deeper Act 2/3 arcs that touch
-  # these. Phase 38.E's TestAllEndingsReachable sits on top.
+  # ============================================================
+  # SECTION B. Act 1 supplement (this phase) — Dragon Relic
+  # quest completes the relic quest hookup.
+  # ============================================================
+
+  - id: "act1.dragon_relic_in_vault"
+    title: "EX07 — The dragon relic in the vault"
+    text: |
+      Behind the false wall, down a stair carved for no foot but
+      the relic's, you find it: a stone twice the size of your
+      head, brown as river mud, half-buried in its own pedestal.
+      It hums faintly when you put your hand to it — not in the
+      ear, in the chest — and the hum resolves into something
+      like a name you have not yet learned to say. The keeper's
+      commission was to find this. Yours, it seems, is to take
+      it from here.
+    choices:
+      - id: "claim_relic"
+        text: "Take the stone."
+        next_node_id: "act1.ally_appears_intro"
+        effects:
+          - set_flag: "relic_claimed"
+          - trigger_event: "relic_rumble"
+      - id: "leave_relic"
+        text: "Pull your hand back. Leave it where it is."
+        next_node_id: "act1.greyhall_keep"
+
+  - id: "act1.act1_close_ridge"
+    title: "EX08 — Closing the eastern ridge"
+    text: |
+      The relic is heavier in your pack than it should be. The
+      keeper walks you to the edge of the eastern ridge; Elara
+      does not say much; the void-shape over the inner chamber
+      does not say anything at all. When you reach the high pass,
+      the keeper stops, puts her hand on your shoulder once, then
+      turns back toward Greyhall without a word. The road down to
+      the mountains begins at the cairn at the top of the pass.
+    choices:
+      - id: "head_down_to_mountains"
+        text: "Turn south. Take the road down."
+        next_node_id: "act1.mountain_path_begins"
+        effects:
+          - set_flag: "act1_completed"
+
+  - id: "act1.mountain_path_begins"
+    title: "EX09 — Mountain path begins"
+    text: |
+      The road down to the mountains is older than the kingdom,
+      and quieter. You are a day's walk from any hearthstone you
+      can call by name, and the relic under your pack changes
+      weather as you pass through it — colder here, warmer there,
+      and once a long quarter-mile of nothing at all. You walk.
+    choices:
+      - id: "continue_to_act2"
+        text: "Continue. The mountains wait."
+        next_node_id: "act2.act2_entry"
+        effects:
+          - set_flag: "act2_started"
+
+  - id: "act1.aldric_arrival"
+    title: "EX10 — Captain Aldric arrives"
+    text: |
+      You do not hear Aldric until he is at the gate. He hands
+      his coat to the keeper's stable-girl as if he has been
+      expected for hours. He looks you over once, slowly, the
+      way a man who has survived four border-wars looks at a
+      candidate for a fifth. "The captain of Greyhall's guard,"
+      he says, by way of introduction. "You have a relic under
+      your pack. I am to walk beside you for as long as the
+      spire at Aldran is silent." He does not explain further.
+    choices:
+      - id: "accept_aldric"
+        text: "Walk with him."
+        next_node_id: "act1.act1_close_ridge"
+        effects:
+          - set_flag: "aldric_walking"
+          - modify_relationship: { character: "Aldric", axis: "respect", value: 20 }
+          - modify_reputation: { faction: "kingdom", value: 10 }
+      - id: "decline_aldric"
+        text: "Decline. Walk alone."
+        next_node_id: "act1.act1_close_ridge"
+        effects:
+          - modify_relationship: { character: "Aldric", axis: "respect", value: -10 }
+          - modify_reputation: { faction: "kingdom", value: -5 }
+
+  # ============================================================
+  # SECTION C. Act 2 — ally-gathering arc (this phase)
+  # ============================================================
+
+  - id: "act2.act2_entry"
+    title: "Act II — The mountains, the allies, the truth"
+    text: |
+      The mountain cross begins in the cold. Aldric, when he
+      is walking with you, walks in silence for the first three
+      hours and then begins to tell you where his veterans are
+      buried — small cairn, small cairn, small cairn — across
+      seventeen valleys. By the time the spire at Aldran is
+      showing above the tree-line, he has stopped counting and
+      started listening. The relic under your pack is quieter
+      than it was. Something ahead is paying attention.
+    choices:
+      - id: "cross_into_mountains"
+        text: "Cross into the mountains."
+        next_node_id: "act2.mountain_crossing"
+        effects:
+          - set_flag: "mountain_pass_crossed"
+
+  - id: "act2.mountain_crossing"
+    title: "A1 — The mountain crossing"
+    text: |
+      The pass climbs through three days of cold weather. The
+      first night you sleep in a shepherd's bothy whose owner
+      has been dead a week and whose sheep have made their
+      peace with the cold. The second night Aldric teaches you
+      a sentry rhythm that turns out for the third. By the
+      morning of the third day the trees are gone and the rocks
+      are older than the kingdom and you are, you realise,
+      exactly where the spire's hush was telling you to come.
+    choices:
+      - id: "approach_selenes_tower"
+        text: "Approach the crystal spire."
+        next_node_id: "act2.selenes_tower"
+      # Phase 38.B/C: protagonist-specific detour hook.
+      - id: "open_kael_letter"
+        text: "Stop. Read the letter you have been carrying."
+        next_node_id: "act2.kael_letter"
+        conditions:
+          - flag: "Kael_Protagonist"
+      - id: "open_lyra_slate"
+        text: "Stop. Take out the slate and the chisel."
+        next_node_id: "act2.lyra_runic_slate"
+        conditions:
+          - flag: "Lyra_Protagonist"
+      - id: "open_ravens_letter"
+        text: "Stop. Open the letter from your aunt's lawyers."
+        next_node_id: "act2.raven_brother"
+        conditions:
+          - flag: "Raven_Protagonist"
+      - id: "open_arias_prayer_book"
+        text: "Stop. Take out the prayer book Father Holt gave you."
+        next_node_id: "act2.aria_pilgrim_book"
+        conditions:
+          - flag: "Aria_Protagonist"
+
+  - id: "act2.selenes_tower"
+    title: "A2 — Selene's tower, outside"
+    text: |
+      The crystal spire is taller than it should be. Its walls
+      shift in the afternoon light in ways that no mineral ever
+      has, and the door is open. Selene is at the foot of the
+      stairs, a slim figure in a scholar's grey, hands full of
+      ink-stained pages. She sees you, sees Aldric behind you,
+      sees the bulk of your pack. She does not move from where
+      she is.
+    choices:
+      - id: "approach_selene"
+        text: "Approach her."
+        next_node_id: "act2.selenes_initiation"
+        effects:
+          - trigger_event: "selene_oath"
+
+  - id: "act2.selenes_initiation"
+    title: "A3 — Selene's initiation question"
+    text: |
+      "The relic you carry is older than the kingdom," Selene
+      says, not as a question. "The kingdom is older than the
+      spire. The spire is older than the language I am asking
+      you this in. Will you let me read it for an evening?"
+      The ink is still wet on the page she has been working on.
+    choices:
+      - id: "let_selene_read"
+        text: "Take it from your pack. Let her read."
+        next_node_id: "act2.selenes_farewell"
+        effects:
+          - set_flag: "selene_read_the_relic"
+          - modify_relationship: { character: "Selene", axis: "trust", value: 30 }
+          - trigger_event: "maren_teaches"
+      - id: "refuse_selene"
+        text: "Refuse. The relic stays with you."
+        next_node_id: "act2.selenes_farewell"
+        effects:
+          - modify_relationship: { character: "Selene", axis: "trust", value: -15 }
+
+  - id: "act2.selenes_farewell"
+    title: "A4 — Selene's farewell"
+    text: |
+      Selene walks you to the edge of the spire's shadow. She
+      does not thank you — she is not the sort — but she puts
+      a sealed envelope into Aldric's hand and says, "For the
+      kingdom, when the time comes." The road north toward
+      Orion's territory is one ridge over and a day's walk.
+    choices:
+      - id: "head_for_orions_camp"
+        text: "Take the road north."
+        next_node_id: "act2.pathway_a"
+
+  - id: "act2.pathway_a"
+    title: "A5 — Pathway to Orion"
+    text: |
+      The high pass between Selene's spire and the mercenary
+      country is held by a single shepherd, paid by both sides
+      to keep the road open. He nods at Aldric, asks after a
+      cousin of Aldric's by name, and does not ask you anything.
+      It is the longest day of walking you have done since the
+      prologue. You arrive at Orion's camp by torchlight.
+    choices:
+      - id: "enter_orions_camp"
+        text: "Enter the camp."
+        next_node_id: "act2.orions_camp"
+
+  - id: "act2.orions_camp"
+    title: "A6 — Orion's camp"
+    text: |
+      The mercenary camp is set on a shelf above a fast river
+      where the noise of the water drowns out everything they
+      want kept quiet. Orion is older than you expected; he
+      looks at the relic under your pack and laughs once. "I
+      have been looking for that since your grandfather's
+      lifetime," he says. "Sit. Eat. You are going to lose
+      sleep tonight whether you want to or not."
+    choices:
+      - id: "accept_orions_challenge"
+        text: "Sit. Eat. Take the challenge."
+        next_node_id: "act2.orions_challenge"
+        effects:
+          - trigger_event: "orion_betrayal"
+
+  - id: "act2.orions_challenge"
+    title: "A7 — Orion's challenge"
+    text: |
+      The challenge is not combat — it is to spend one night in
+      the dark outside Orion's tent, alone, with the relic as
+      your only companion. Orion's voice from inside the tent
+      tells you, near dawn, "You can come in now." When you do,
+      the camp has changed. Some of the mercenaries are gone.
+      Some new ones have arrived. Harlan — Orion's second —
+      hands you a bowl of broth and says nothing.
+    choices:
+      - id: "take_orions_broth"
+        text: "Take the broth. Eat."
+        next_node_id: "act2.orions_farewell"
+        effects:
+          - set_flag: "orion_oath_taken"
+          - modify_relationship: { character: "Orion", axis: "respect", value: 25 }
+          - modify_relationship: { character: "Harlan", axis: "affection", value: 10 }
+      - id: "refuse_harlans_broth"
+        text: "Refuse. Walk on."
+        next_node_id: "act2.orions_farewell"
+        effects:
+          - set_flag: "orion_broken"
+          - modify_relationship: { character: "Orion", axis: "respect", value: -15 }
+          - trigger_event: "harlan_persuades"
+
+  - id: "act2.orions_farewell"
+    title: "A8 — Orion's farewell"
+    text: |
+      Orion walks you to the road south. He does not say much.
+      He hands Aldric a sealed letter. He looks at the relic
+      under your pack and he does not say anything about it.
+      Harlan, two paces behind, touches his forehead with two
+      fingers and nods once.
+    choices:
+      - id: "head_for_maren_library"
+        text: "Take the road south."
+        next_node_id: "act2.pathway_b"
+
+  - id: "act2.pathway_b"
+    title: "A9 — Pathway to Maren"
+    text: |
+      The road south curves through three farms that all belong
+      to the same widow. Aldric knows her by name; she has not
+      seen him in nine years. They speak for an hour in the
+      kitchen. When you leave, she gives you a small grey
+      ledger that "Maren may want to see." You do not open it.
+      The library is two hills onward.
+    choices:
+      - id: "approach_maren_library"
+        text: "Approach the library."
+        next_node_id: "act2.maren_library"
+
+  - id: "act2.maren_library"
+    title: "A10 — Maren's library"
+    text: |
+      The library is older than the kingdom, smaller than a
+      single shepherd's hut, and contains more books than any
+      building you have ever been in. Maren is at the third
+      desk from the door, mid-paragraph, not looking up. The
+      widow's grey ledger is taken from your hand without
+      comment half an hour after you put it down. She reads it
+      while she works.
+    choices:
+      - id: "ask_first_question"
+        text: "Ask her your first question."
+        next_node_id: "act2.maren_first_question"
+        effects:
+          - trigger_event: "maren_teaches"
+
+  - id: "act2.maren_first_question"
+    title: "A11 — Maren's first question to you"
+    text: |
+      Maren does not ask your name. She asks why you carried
+      the relic uphill for nine days and did not open the packet
+      the keeper put beside it. You do not have a clean answer.
+      She does, and writes it down in the margin of the widow's
+      ledger and hands it back to you with a small grey seal
+      pressed into the corner.
+    choices:
+      - id: "study_with_maren"
+        text: "Stay. Study alone with her for an evening."
+        next_node_id: "act2.maren_farewell"
+        effects:
+          - set_flag: "maren_study_complete"
+          - modify_relationship: { character: "Maren", axis: "trust", value: 25 }
+          - modify_reputation: { faction: "mages", value: 5 }
+      - id: "thank_maren"
+        text: "Thank her and go."
+        next_node_id: "act2.maren_farewell"
+        effects:
+          - modify_relationship: { character: "Maren", axis: "trust", value: 5 }
+
+  - id: "act2.maren_farewell"
+    title: "A12 — Maren's farewell"
+    text: |
+      Maren does not walk you out. The grey ledger you are
+      carrying has your name in the margin, in her hand, and
+      she has not asked your name once. The road west toward
+      Aldric's keep is lined with the willow trees she likes
+      to read under. You follow it.
+    choices:
+      - id: "head_for_aldrics_keep"
+        text: "Take the road west."
+        next_node_id: "act2.aldric_keep"
+
+  - id: "act2.aldric_keep"
+    title: "A13 — Aldric's keep"
+    text: |
+      Aldric's keep is older than the kingdom's capital and
+      smaller than most town halls. Inside there is one
+      long table, twelve chairs, a hearth that has never gone
+      out, and a single portrait of a man who looks more like
+      Aldric than Aldric does. He doesn't explain it. He sits
+      at one end of the table and waits.
+    choices:
+      - id: "accept_aldrics_commission"
+        text: "Accept his commission."
+        next_node_id: "act2.aldric_farewell"
+        effects:
+          - set_flag: "aldric_commissioned"
+          - trigger_event: "aldric_commission"
+          - modify_relationship: { character: "Aldric", axis: "trust", value: 20 }
+          - modify_reputation: { faction: "kingdom", value: 5 }
+      - id: "decline_aldrics_commission"
+        text: "Decline. Walk out."
+        next_node_id: "act2.aldric_farewell"
+        effects:
+          - modify_relationship: { character: "Aldric", axis: "trust", value: -10 }
+          - modify_reputation: { faction: "kingdom", value: -5 }
+
+  - id: "act2.aldric_farewell"
+    title: "A14 — Aldric's farewell"
+    text: |
+      The road south toward Harlan's roadside post is an old
+      road — older than Aldric's keep, older than the kingdom,
+      older than the language the milestone-cuts are written
+      in. Aldric gives you the letter Orion gave him at the
+      pass. "For Harlan," he says. "He has not heard from
+      Orion in years." You take it.
+    choices:
+      - id: "head_for_harlans_roadside"
+        text: "Take the road south."
+        next_node_id: "act2.harlan_roadside"
+
+  - id: "act2.harlan_roadside"
+    title: "A15 — Harlan's roadside"
+    text: |
+      Harlan's roadside post is a half-collapsed waystation with
+      a roof Aldric would not put his horse under. Harlan has
+      made it work by sleeping on the side with fewer leaks.
+      He sees the letter from a hundred paces. He reads it
+      without opening it. He hands it back.
+    choices:
+      - id: "give_harlan_the_letter"
+        text: "Give him the letter."
+        next_node_id: "act2.harlan_warning"
+        effects:
+          - modify_relationship: { character: "Harlan", axis: "trust", value: 25 }
+          - trigger_event: "harlan_persuades"
+
+  - id: "act2.harlan_warning"
+    title: "A16 — Harlan's warning"
+    text: |
+      "Don't go south," Harlan says. "Not tonight. The road
+      south is held by the emperor's men; they have been
+      waiting for someone with a relic under their pack for
+      three weeks." He shows you the river path instead. It
+      is longer. It is safer. The choice is yours.
+    choices:
+      - id: "follow_harlans_warning"
+        text: "Follow the river path."
+        next_node_id: "act2.harlan_farewell"
+        effects:
+          - modify_relationship: { character: "Harlan", axis: "affection", value: 15 }
+      - id: "ignore_harlans_warning"
+        text: "Take the road south as Aldric did."
+        next_node_id: "act2.harlan_farewell"
+        effects:
+          - modify_relationship: { character: "Harlan", axis: "affection", value: -10 }
+          - modify_reputation: { faction: "underworld", value: -10 }
+
+  - id: "act2.harlan_farewell"
+    title: "A17 — Harlan's farewell"
+    text: |
+      Harlan walks you to the edge of his post. He does not
+      say goodbye — he says "the keep of the Old Kings is two
+      hours downstream, and the relic you are carrying belongs
+      to them." He is right; the relic is quieter than it has
+      been since you took it from Greyhall.
+    choices:
+      - id: "head_for_act2_closeup"
+        text: "Walk on."
+        next_node_id: "act2.act2_closeup"
+
+  - id: "act2.act2_closeup"
+    title: "A18 — The Act 2 closeup"
+    text: |
+      You sit by the side of the river path long enough to
+      count the things that have changed: the relic is quieter;
+      Aldric has stopped writing to the kingdom; Elara has
+      stopped writing to her captain; Selene's envelope is in
+      Aldric's pack; Orion's letter is in Harlan's; Maren's
+      ledger has your name in the margin. You have not crossed
+      the kingdom's border, but you have crossed four others.
+    choices:
+      - id: "continue_to_act3"
+        text: "Stand up. Continue."
+        next_node_id: "act2.act3_handoff"
+
+  - id: "act2.act3_handoff"
+    title: "A19 — Handoff to Act 3"
+    text: |
+      The keep of the Old Kings is older than the kingdom, and
+      its doors are open. There is a mural of a serpent coiled
+      around the world; its mouth is open; the relic under
+      your pack rings once when you pass under it. The scarlet
+      road rises behind the keep and descends into a long
+      valley you have not seen before. The person waiting for
+      you at the doorway is someone you already know. (Act 3
+      begins here; not authored by Phase 38.B/C.)
+    choices:
+      - id: "enter_the_keep"
+        text: "Enter the keep."
+        next_node_id: "act2.act3_handoff"
+        effects:
+          - set_flag: "act2_completed"
+
+  # ============================================================
+  # SECTION D. Act 2 protagonist-specific detours (this phase).
+  # Each one routes to that protagonist's deep exclusive,
+  # currently OR eventually; the user-author path is via the
+  # upstream `open_kael_letter` etc. choices in
+  # act2.mountain_crossing (Section C).
+  # ============================================================
+
+  - id: "act2.kael_letter"
+    title: "KAEL — A letter from the order"
+    text: |
+      The letter is sealed in the old wax. You have carried it
+      since the morning after your order's keep fell. You
+      break the seal on a flat stone with a view of the
+      mountains. Inside: a single line in your grandmother's
+      hand, and below it a name you have not thought of for
+      nineteen years. The scholar's chapter is not finished.
+    choices:
+      - id: "fulfill_the_chapter"
+        text: "Fulfill the chapter."
+        next_node_id: "kael.scholars_final_chapter"
+        effects:
+          - set_flag: "kael_chapter_open"
+          - modify_reputation: { faction: "kingdom", value: -5 }
 
   - id: "kael.scholars_final_chapter"
     title: "DEEP — Kael's final chapter with the order"
@@ -252,9 +770,27 @@ nodes:
     choices:
       - id: "close_the_book"
         text: "Close the manuscript."
-        next_node_id: "act1.ashwick_entrance"
+        next_node_id: "act2.mountain_crossing"
         conditions:
           - flag: "Kael_Protagonist"
+        effects:
+          - set_flag: "kael_chapter_closed"
+
+  - id: "act2.lyra_runic_slate"
+    title: "LYRA — A slate from the workshop"
+    text: |
+      The chisel is not the one your grandmother taught you to
+      hold, but it is the one she left in your worktable. The
+      slate you lay flat on the rock holds the morning light
+      better than the ones at the workshop. You inscribe the
+      rune your grandmother taught you, and this one — for the
+      first time — holds.
+    choices:
+      - id: "fulfill_the_inscription"
+        text: "Fulfill the inscription."
+        next_node_id: "lyra.runic_trial"
+        effects:
+          - set_flag: "lyra_inscription_open"
 
   - id: "lyra.runic_trial"
     title: "DEEP — Lyra's first true inscription"
@@ -268,9 +804,27 @@ nodes:
     choices:
       - id: "step_outside"
         text: "Step outside. Take the road."
-        next_node_id: "act1.ashwick_entrance"
+        next_node_id: "act2.mountain_crossing"
         conditions:
           - flag: "Lyra_Protagonist"
+        effects:
+          - set_flag: "lyra_inscription_closed"
+
+  - id: "act2.raven_brother"
+    title: "RAVEN — A letter from your aunt's lawyers"
+    text: |
+      The seal is broken but the contents you already know. It
+      is the second letter that surprises you. It is from a
+      cousin you thought dead, asking you to come north, and
+      offering a small grey box of things the aunt's lawyers
+      said were not yours. The lock-box is in your pack. It
+      is heavier than the relic.
+    choices:
+      - id: "open_the_lock_box"
+        text: "Open the lock-box."
+        next_node_id: "raven.heirs_judgment"
+        effects:
+          - set_flag: "raven_lock_box_open"
 
   - id: "raven.heirs_judgment"
     title: "DEEP — Raven's small inheritance"
@@ -284,9 +838,27 @@ nodes:
     choices:
       - id: "walk_to_window"
         text: "Walk to the window. Watch the dawn."
-        next_node_id: "act1.ashwick_entrance"
+        next_node_id: "act2.mountain_crossing"
         conditions:
           - flag: "Raven_Protagonist"
+        effects:
+          - set_flag: "raven_inheritance_counted"
+
+  - id: "act2.aria_pilgrim_book"
+    title: "ARIA — A prayer book from the Faith"
+    text: |
+      The prayer book is the same one Father Holt gave you on
+      the morning he put a cup of water in your hand. The
+      cathedral in Ashwick has been writing you letters for
+      three weeks; you have not answered the last two. You open
+      the prayer book. The first page is the morning psalm.
+      The last page is in Father Holt's hand.
+    choices:
+      - id: "read_the_last_page"
+        text: "Read the last page."
+        next_node_id: "aria.dawns_first_prayer"
+        effects:
+          - set_flag: "aria_book_opened"
 
   - id: "aria.dawns_first_prayer"
     title: "DEEP — Aria's first dawns"
@@ -301,6 +873,8 @@ nodes:
     choices:
       - id: "kneel_through_prayer"
         text: "Kneel through the prayer."
-        next_node_id: "act1.ashwick_entrance"
+        next_node_id: "act2.mountain_crossing"
         conditions:
           - flag: "Aria_Protagonist"
+        effects:
+          - set_flag: "aria_prayer_complete"

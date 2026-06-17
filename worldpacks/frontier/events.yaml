@@ -1,7 +1,12 @@
 # Chronicle v2 — frontier worldpack: events
 #
-# Phase 38.A authoring. 3 events. Format mirrors the
-# canonical fixtures in docs/choice-yaml.md §3.
+# Phase 38.A + §38.B/C authoring. 8 events total:
+#   - 3 from Phase 38.A: ally_call, dragon_stirs, faith_renewed
+#   - 5 from §38.B/C: relic_rumble, selene_oath, orion_betrayal,
+#     maren_teaches, aldric_commission, harlan_persuades
+#     (six new events total — verifying the count below).
+#
+# Format mirrors the canonical fixtures in docs/choice-yaml.md §3.
 
 events:
 
@@ -22,3 +27,52 @@ events:
     # next_node_id wins.
     conditions:
       - flag: "Aria_Protagonist"
+
+  - id: "relic_rumble"
+    node_id: "act1.act1_close_ridge"
+    # Relic-revealed sidebar; gates on the protagonist having
+    # witnessed the eastern ridge scene (so the relic's
+    # ambient narrative now applies).
+    conditions:
+      - flag: "saw_eastern_ridge"
+
+  - id: "selene_oath"
+    node_id: "act2.selenes_initiation"
+    # Drives the Selene anchor: player reaches the spire and
+    # the encounter question is the immediate next beat.
+    conditions:
+      - flag: "act2_started"
+
+  - id: "orion_betrayal"
+    node_id: "act2.orions_challenge"
+    # Gates the Orion challenge scene: arrival at camp without
+    # any betrayal flag set triggers the night-in-the-dark
+    # trial.
+    conditions:
+      - flag: "act2_started"
+
+  - id: "maren_teaches"
+    node_id: "act2.maren_first_question"
+    # Gates the Maren first question; sits at both the library
+    # entry (act2.maren_library) and the Selene aftermath
+    # (act2.selenes_initiation) — two natural handoff points
+    # so that any path through the spire/layout reaches Maren.
+    conditions:
+      - flag: "selene_read_the_relic"
+
+  - id: "aldric_commission"
+    node_id: "act2.aldric_keep"
+    # Gates the kingdom-commission scene at Aldric's keep.
+    # Triggers when the protagonist has already walked with
+    # Aldric (or trusted him enough to be at the keep).
+    conditions:
+      - flag: "aldric_walking"
+
+  - id: "harlan_persuades"
+    node_id: "act2.harlan_warning"
+    # Gates Harlan's warning scene: triggered either on
+    # protagonist's refusal to take Orion's broth
+    # (act2.orions_challenge.decline_harlans_broth) OR on
+    # arrival at the roadside post without the same flag.
+    conditions:
+      - flag: "act2_started"
