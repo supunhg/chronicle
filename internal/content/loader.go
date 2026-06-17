@@ -57,14 +57,15 @@ type Protagonist struct {
 	StartingParty     []string
 }
 
-// Companion is the loader-side representation of an entry in
-// companions.yaml. Phase 36.E uses Companion.ID for
-// cross-reference validation only; richer companion data
-// (backstory nodes, romance thresholds) lands in Phase 38.
-type Companion struct {
-	ID          string
-	Description string
-}
+// Companion is the canonical v2 companion per ARCHITECTURE.md
+// §15 + PHASES.md §37.C. The Companion type lives in
+// internal/story (alongside the canonical parser
+// CompanionsFromYAML); content re-exports it as a type
+// alias so Phase 36.E-era callers keep their
+// `content.Companion` reference path. Phase 38's depth
+// (backstory nodes, romance axes, thresholds) extends the
+// underlying story.Companion without breaking the alias.
+type Companion = story.Companion
 
 // Load reads YAML content from `dir` and returns a fully
 // validated *Loaded bundle.
@@ -159,15 +160,16 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// ----- nodes.yaml / events.yaml / endings.yaml -----
+// ----- nodes.yaml / events.yaml / endings.yaml / companions.yaml -----
 //
-// Per PHASES.md §37.A + §37.B the canonical "one parser per
-// file type, in the package that owns the return type" rule
+// Per PHASES.md §37.A + §37.B + §37.C the canonical "one parser
+// per file type, in the package that owns the return type" rule
 // applies:
 //
-//   - nodes.yaml  -> internal/story/yaml.go::LoadStoryNodes
-//   - events.yaml -> internal/story/yaml.go::EventsFromYAML
-//   - endings.yaml -> internal/endings/yaml.go::EndingsFromYAML
+//   - nodes.yaml      -> internal/story/yaml.go::LoadStoryNodes
+//   - events.yaml     -> internal/story/yaml.go::EventsFromYAML
+//   - endings.yaml    -> internal/endings/yaml.go::EndingsFromYAML
+//   - companions.yaml -> internal/story/yaml.go::CompanionsFromYAML
 //
 // The content package owns ONLY file I/O + cross-reference
 // validation; each read*() function is a thin wrapper around
@@ -177,6 +179,9 @@ func fileExists(path string) bool {
 // EndingsFromYAML lives in internal/endings (not story) to
 // avoid the import cycle `content -> endings -> story ->
 // endings`; see PHASES.md §37.B import-cycle fix.
+// CompanionsFromYAML lives in internal/story because the
+// Companion type does not introduce a cycle (story does not
+// import content).
 
 // readNodes delegates the YAML→StoryNode translation to
 // internal/story.LoadStoryNodes.
@@ -270,36 +275,27 @@ func readProtagonists(path string) ([]Protagonist, error) {
 
 // ----- companions.yaml (optional) -----
 
-type companionsDoc struct {
-	Companions []yamlCompanion `yaml:"companions"`
-}
-
-type yamlCompanion struct {
-	ID          string `yaml:"id"`
-	Description string `yaml:"description"`
-}
-
+// readCompanions delegates the YAML→Companion translation to
+// internal/story.CompanionsFromYAML.
+//
+// Per PHASES.md §37.C the canonical parser lives in story
+// because Companion is a story-side type. The loader owns
+// ONLY file I/O + the slice→map keying (validateParty-
+// Companions does O(1) ID lookup, which is why this function
+// returns a map rather than a slice). Validation gates
+// (empty id, duplicate id) are owned by the parser.
 func readCompanions(path string) (map[string]Companion, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("content: readCompanions: %s: %w", path, err)
 	}
-	var doc companionsDoc
-	if err := yamlUnmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("content: readCompanions: parse %s: %w", path, err)
+	cs, err := story.CompanionsFromYAML(raw)
+	if err != nil {
+		return nil, fmt.Errorf("content: readCompanions: %s: %w", path, err)
 	}
-	out := make(map[string]Companion, len(doc.Companions))
-	for i, yc := range doc.Companions {
-		if yc.ID == "" {
-			return nil, fmt.Errorf("content: readCompanions: %s companion[%d] has empty id", path, i)
-		}
-		if _, ok := out[yc.ID]; ok {
-			return nil, fmt.Errorf("content: readCompanions: %s companion %q duplicated", path, yc.ID)
-		}
-		out[yc.ID] = Companion{
-			ID:          yc.ID,
-			Description: yc.Description,
-		}
+	out := make(map[string]Companion, len(cs))
+	for _, c := range cs {
+		out[c.ID] = c
 	}
 	return out, nil
 }

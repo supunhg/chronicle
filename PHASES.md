@@ -67,8 +67,8 @@ This phase is design + spec, not authoring. Authoring is Phase 38.
 | Sub | Goal | Acceptance test | Status |
 |---|---|---|---|
 | **37.A** | Story node YAML spec. Required fields (`id`, `title`, `text`, `choices`, `events`). Optional fields. Example in `docs/story-node-yaml.md`. | `internal/story/nodes.go` parses a canonical example. | ✅ done |
-| **37.B** | Choice / Effect / Condition YAML spec. Same shape as the Go types. Example in `docs/choice-yaml.md`. | `internal/story/choices.go` and `internal/story/conditions.go` and `internal/story/effects.go` parse canonical examples. |
-| **37.C** | Relationship / Reputation / Inventory / Item YAML spec. The `Relationship` struct (§9), `ReputationState` struct (§11), `Inventory` struct (§12). | Loaders parse canonical examples. |
+| **37.B** | Choice / Effect / Condition YAML spec. Same shape as the Go types. Example in `docs/choice-yaml.md`. | `internal/story/choices.go` and `internal/story/conditions.go` and `internal/story/effects.go` parse canonical examples. | ✅ done |
+| **37.C** | Relationship / Reputation / Inventory / Item YAML spec. The `Relationship` struct (§9), `ReputationState` struct (§11), `Inventory` struct (§12). | Loaders parse canonical examples. | ✅ done |
 | **37.D** | Character profile YAML spec. The `CharacterProfile` struct (§15) — `name`, `starting_flags`, `starting_variables`, `starting_inventory`, `exclusive_nodes`. | Loaders parse canonical examples. |
 | **37.E** | Ending YAML spec. The `Ending` struct (§19) — `id`, `priority`, `conditions`. | Loader parses canonical examples; ending evaluation returns the highest-valid ending. |
 | **37.F** | Content addressing. Each YAML is hashed at load. Mismatched content is a hard error. | `internal/content/loader.go` exposes `ContentHash(name string) string`. |

@@ -65,13 +65,69 @@ func EventsFromYAML(data []byte) ([]Event, error) {
 	return out, nil
 }
 
+// Companion is the canonical v2 companion per ARCHITECTURE.md
+// §15. Phase 38 (companion depth) is expected to add fields
+// like BackstoryNodeID, RomanceAxis, and thresholds; the YAML
+// schema tolerates unknown fields so future-phase extensions
+// do not break older content files.
+//
+// Companion lives in package story (not content) per the
+// PHASES.md §37.A "one canonical home" rule: the parser and
+// the type it produces both live in story.
+type Companion struct {
+	// ID is the canonical companion identifier (e.g. "Elara",
+	// "Selene"). Unique across the file.
+	ID string
+
+	// Description is the short in-game tooltip / selection
+	// label for the companion. Free-text; not interpreted by
+	// the engine.
+	Description string
+}
+
+// CompanionsFromYAML parses a companions.yaml document per
+// the schema documented in docs/companion-yaml.md (PHASES.md
+// §37.C + ARCHITECTURE.md §15).
+//
+// CompanionsFromYAML is the canonical entry point for
+// YAML→companions. internal/content/loader.go::readCompanions
+// delegates to it; the loader then keys the slice into a
+// map[string]Companion for O(1) ID lookup during validation
+// (validatePartyCompanions).
+//
+// Unknown fields in the YAML record are silently tolerated:
+// Phase 38 may add BackstoryNodeID, RomanceAxis, and
+// thresholds without breaking the parser.
+func CompanionsFromYAML(data []byte) ([]Companion, error) {
+	var doc companionsDoc
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("story: CompanionsFromYAML: parse: %w", err)
+	}
+	out := make([]Companion, 0, len(doc.Companions))
+	seen := make(map[string]bool, len(doc.Companions))
+	for i, yc := range doc.Companions {
+		if yc.ID == "" {
+			return nil, fmt.Errorf("story: CompanionsFromYAML: companion[%d] has empty id", i)
+		}
+		if seen[yc.ID] {
+			return nil, fmt.Errorf("story: CompanionsFromYAML: companion %q duplicated", yc.ID)
+		}
+		seen[yc.ID] = true
+		out = append(out, Companion{
+			ID:          yc.ID,
+			Description: yc.Description,
+		})
+	}
+	return out, nil
+}
+
 // EndingsFromYAML moved to internal/endings/yaml.go per
 // PHASES.md §37.B — its return type is []endings.Ending, so
 // the parser lives in the package that owns Ending. Putting
 // it in story would create the import cycle
 // `content → endings → story → endings`. The two packages'
-// parsers (LoadStoryNodes + EventsFromYAML in story;
-// EndingsFromYAML in endings) all dispatch condition
+// parsers (LoadStoryNodes + EventsFromYAML + CompanionsFromYAML
+// in story; EndingsFromYAML in endings) all dispatch condition
 // parsing through this file's UnmarshalCondition, so the
 // single-key-map discipline remains in one canonical home.
 
@@ -138,6 +194,15 @@ type storyYAMLEvent struct {
 	ID         string           `yaml:"id"`
 	NodeID     string           `yaml:"node_id"`
 	Conditions []map[string]any `yaml:"conditions,omitempty"`
+}
+
+type companionsDoc struct {
+	Companions []storyYAMLCompanion `yaml:"companions"`
+}
+
+type storyYAMLCompanion struct {
+	ID          string `yaml:"id"`
+	Description string `yaml:"description"`
 }
 
 // ----- Conversion helpers (private) -----
