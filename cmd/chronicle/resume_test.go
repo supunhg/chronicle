@@ -14,6 +14,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,35 +55,77 @@ func TestResume_ValidSave(t *testing.T) {
 	if err := runResume([]string{out}, stderr); err != nil {
 		t.Fatalf("runResume: %v", err)
 	}
-	stderrStr := stderrText()
-	// Five named lines on stderr.
-	for _, want := range []string{
-		"resume: loaded ",
-		"resume: Version=",
+	text := stderrText()
+	// The 4-line identity block (Version, Protagonist, CurrentNodeID,
+	// WorldHash=) follows the variable-content "loaded" line and is
+	// what we want to fingerprint in adjacency. Each line's complete
+	// text is in the join (Version's dynamic value included) so the
+	// resulting substring is an exact substring of stderr.
+	idBlock := strings.Join([]string{
+		fmt.Sprintf("resume: Version=%d", state.CurrentVersion),
 		"resume: Protagonist=kael",
 		"resume: CurrentNodeID=act1.opening",
 		"resume: WorldHash=",
-	} {
-		if !strings.Contains(stderrStr, want) {
-			t.Errorf("stderr missing %q; got: %s", want, stderrStr)
+	}, "\n")
+	if !strings.Contains(text, idBlock) {
+		t.Errorf("stderr missing joined identity block; got: %s", text)
+	}
+	// The "loaded" line has content after the prefix that varies
+	// per-fixture (byte count, path), so we check its prefix only.
+	if !strings.Contains(text, "resume: loaded ") {
+		t.Errorf("stderr missing the 'loaded' lead line; got: %s", text)
+	}
+}
+
+// TestResume_EmptyWorldState: a SaveGame with Version set but a fully
+// default WorldState (state.NewWorldState: no Protagonist, no
+// CurrentNodeID, no flags, no history) round-trips cleanly. The
+// conditional Protagonist/CurrentNodeID stderr lines are correctly
+// suppressed when those fields are empty.
+func TestResume_EmptyWorldState(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "empty.json")
+
+	sg := state.SaveGame{Version: state.CurrentVersion, WorldState: state.NewWorldState()}
+	data, err := sg.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal fixture: %v", err)
+	}
+	if err := os.WriteFile(out, data, 0600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	stderr, stderrText := testResumeStderr()
+	if err := runResume([]string{out}, stderr); err != nil {
+		t.Fatalf("runResume: %v", err)
+	}
+	text := stderrText()
+	for _, must := range []string{"resume: Version=", "resume: WorldHash="} {
+		if !strings.Contains(text, must) {
+			t.Errorf("stderr missing %q; got: %s", must, text)
+		}
+	}
+	for _, mustNot := range []string{"resume: Protagonist=", "resume: CurrentNodeID="} {
+		if strings.Contains(text, mustNot) {
+			t.Errorf("empty WorldState must NOT print %q; got: %s", mustNot, text)
 		}
 	}
 }
 
-// TestResume_MissingPath: zero positional args returns errMissingPath
-// sentinel, not a crash. User-actionable: usage line was already
-// printed to stderr.
+// TestResume_MissingPath: zero positional args returns a usage error
+// naming "exactly one <path> argument". User-actionable: usage line
+// was already printed to stderr.
 func TestResume_MissingPath(t *testing.T) {
 	stderr, stderrText := testResumeStderr()
 	err := runResume([]string{}, stderr)
 	if err == nil {
 		t.Fatal("expected error for missing <path>; got nil")
 	}
-	if err != errMissingPath {
-		t.Errorf("error: got %v want errMissingPath sentinel", err)
+	if !strings.Contains(err.Error(), "expected exactly one") {
+		t.Errorf("error must state arg-count expectation; got: %v", err)
 	}
-	if !strings.Contains(stderrText(), "<path>") {
-		t.Errorf("stderr should mention <path> for missing-arg case; got: %s", stderrText())
+	if !strings.Contains(stderrText(), "usage: chronicle resume") {
+		t.Errorf("stderr should print usage; got: %s", stderrText())
 	}
 }
 
@@ -95,8 +138,8 @@ func TestResume_TooManyArgs(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for extra positional arg; got nil")
 	}
-	if err != errTooManyArgs {
-		t.Errorf("error: got %v want errTooManyArgs sentinel", err)
+	if !strings.Contains(err.Error(), "got 2") {
+		t.Errorf("error must report actual arg count; got: %v", err)
 	}
 }
 
@@ -212,11 +255,10 @@ func TestResume_UnknownFieldRefused(t *testing.T) {
 	}
 }
 
-// TestResume_UnknownVersionIsStillCurrentVersion (sanity for
-// state.WorldHash's canonical output): two distinct but
-// structurally identical SaveGames produce distinct WorldHashes
-// because their Flags differ. Verifies resume's printed hash is
-// content-sensitive, not a static string.
+// TestResume_HashReflectsContent: two distinct but
+// structurally identical SaveGames (differing only in a flag
+// value) produce distinct WorldHashes. Verifies resume's printed
+// hash is content-sensitive, not a static string.
 func TestResume_HashReflectsContent(t *testing.T) {
 	dir := t.TempDir()
 
@@ -260,7 +302,7 @@ func worldHashFromResume(t *testing.T, path string) string {
 	if err := runResume([]string{path}, stderr); err != nil {
 		t.Fatalf("runResume: %v", err)
 	}
-	h := extractWorldHashFromStderr(stderrText()) //nolint:unused
+	h := extractWorldHashFromStderr(stderrText())
 	if h == "" {
 		t.Fatalf("resume stderr missing WorldHash for %s; got: %s", path, stderrText())
 	}
