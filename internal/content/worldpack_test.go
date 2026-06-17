@@ -106,9 +106,8 @@ func TestLoad_FrontierWorldpack(t *testing.T) {
 		t.Errorf("act1.ashwick_entrance not in graph: %v", err)
 	} else if !strings.Contains(ashwick.Title, "Ashwick") {
 		t.Errorf("act1.ashwick_entrance title = %q; want contains 'Ashwick'", ashwick.Title)
-	}
-
-	// ----- §38.A: 12 endings per ARCHITECTURE.md §20 + romance variants present -----		if len(loaded.Endings) != 12 {
+	}// ----- §38.A: 12 endings per ARCHITECTURE.md §20 + romance variants present -----
+	if len(loaded.Endings) != 12 {
 		t.Errorf("endings count = %d; want 12 (per ARCHITECTURE.md §20)", len(loaded.Endings))
 	}
 	wantRomance := map[string]bool{
