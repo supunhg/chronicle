@@ -11,7 +11,24 @@
 events:
 
   - id: "ally_call"
-    node_id: "act1.ally_appears_intro"
+    # Sidebar: fires whenever the protagonist speaks to
+    # Greyhall's keeper (the canonical Ashwick path), but
+    # does NOT redirect. The redirect was originally
+    # intended so Elara's arrival sequenced AFTER relic
+    # recovery, but with began_journey set at step 1 it
+    # over-fired at step 3 (speak_to_keeper) and skipped
+    # keeper_interview + dragon_relic_in_vault, making the
+    # relic_claimed gate (and therefore dragon_sovereign)
+    # unreachable from the canonical Ashwick start. §38.E
+    # promotes ally_call to a pure sidebar; the canonical
+    # Ashwick path now visits keeper_interview ->
+    # dragon_relic_in_vault -> claim_relic -> ally_appears_intro
+    # naturally, without needing ally_call to redirect.
+    # TestAllEndingsReachable (48 sub-tests in
+    # internal/content/reachable_test.go) is the canonical
+    # regression guard: re-restoring node_id to a redirect
+    # here breaks the dragon_sovereign rows.
+    node_id: ""
     conditions:
       - flag: "began_journey"
 
