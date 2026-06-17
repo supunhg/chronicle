@@ -34,7 +34,7 @@ stack are no longer part of the Chronicle design.
 
 | Sub | Goal | Acceptance test | Status |
 |---|---|---|---|
-| **35.A** | `internal/simulation` deleted. All 7 engines removed. Tests for those engines removed. | `rm -rf internal/simulation`; `go build ./...`; `go test ./...` |
+| **35.A** | `internal/simulation` deleted. All 7 engines removed. Tests for those engines removed. | `rm -rf internal/simulation`; `go build ./...`; `go test ./...` | ✅ done |
 | **35.B** | `internal/llm`, `internal/narrator`, `internal/intent` deleted. The `OPENCODE_ZEN_API_KEY` flow stops being referenced anywhere. | `grep -r OPENCODE_ZEN .` returns nothing in `*.go` |
 | **35.C** | `internal/repl` slimmed to a story-node-renderer shell (no free-text REPL, no intent parser). May eventually be replaced by `internal/ui`. | REPL only renders nodes and selects from authored choices. |
 | **35.D** | `internal/worldpack` slimmed to nothing — the worldpack is no longer the unit of genre. Engine reads authored content from `content/` directly. | `rm -rf internal/worldpack` once the loader lives in `internal/content/loader.go`. |
