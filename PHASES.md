@@ -38,7 +38,7 @@ stack are no longer part of the Chronicle design.
 | **35.B** | `internal/llm`, `internal/narrator`, `internal/intent` deleted. The `OPENCODE_ZEN_API_KEY` flow stops being referenced anywhere. | `grep -r OPENCODE_ZEN .` returns nothing in `*.go` | ✅ done |
 | **35.C** | `internal/repl` slimmed to a story-node-renderer shell (no free-text REPL, no intent parser). May eventually be replaced by `internal/ui`. | REPL only renders nodes and selects from authored choices. |
 | **35.D** | `internal/worldpack` slimmed to nothing — the worldpack is no longer the unit of genre. Engine reads authored content from `content/` directly. | `rm -rf internal/worldpack` once the loader lives in `internal/content/loader.go`. | ✅ done |
-| **35.E** | `internal/lineage` and `internal/simulation/legacy` deleted. Lineage transfer is not part of v2. | `grep -r lineage .` returns nothing in `*.go`. |
+| **35.E** | `internal/lineage` and `internal/simulation/legacy` deleted. Lineage transfer is not part of v2. | `grep -r lineage .` returns nothing in `*.go`. | ✅ done |
 | **35.F** | `internal/tick` deleted. There is no tick loop in v2. | `rm -rf internal/tick`. RNG helpers (EntityRand, TickRand) are gone. |
 
 ---
