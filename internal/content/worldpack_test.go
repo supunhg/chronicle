@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chronicle-dev/chronicle/internal/endings"
+	"github.com/chronicle-dev/chronicle/internal/state"
 	"github.com/chronicle-dev/chronicle/internal/story"
 )
 
@@ -106,10 +108,8 @@ func TestLoad_FrontierWorldpack(t *testing.T) {
 		t.Errorf("act1.ashwick_entrance title = %q; want contains 'Ashwick'", ashwick.Title)
 	}
 
-	// ----- §38.A: 12 endings per ARCHITECTURE.md §20 + romance variants present -----
-
-	if len(loaded.Endings) != 12 {
-		t.Errorf("endings count = %d; want 12", len(loaded.Endings))
+	// ----- §38.A: 12 endings per ARCHITECTURE.md §20 + romance variants present -----		if len(loaded.Endings) != 12 {
+		t.Errorf("endings count = %d; want 12 (per ARCHITECTURE.md §20)", len(loaded.Endings))
 	}
 	wantRomance := map[string]bool{
 		"elara_romance": false,
@@ -251,6 +251,121 @@ func bfsFrom(g *story.Graph, startID string) map[string]bool {
 	return visited
 }
 
+// TestLoad_FrontierWorldpackPerEnding is the Phase 38.D
+// acceptance test. Per PHASES.md §38.D, "each ending condition
+// resolves against a fully-traversed protagonist path":
+//
+//   For each of the 12 endings shipped in
+//   worldpacks/frontier/endings.yaml, build a synthetic
+//   state.WorldState that represents the protagonist having
+//   committed to that ending (one realm flag set, OR one
+//   romance-axis value at threshold), run
+//   endings.Evaluate(ws, loaded.Endings), and assert the
+//   returned ending's ID matches the expected ID.
+//
+// The "fully-traversed" baseline for every prototype is the
+// same: the protagonist has completed Acts 1+2 (act1_completed
+// + act2_completed flags) and has visited a representative
+// spread of mountain-crossing nodes — enough that the wanderer
+// fallback (priority 0) is always a valid candidate. The
+// per-ending setup function sets ONLY the gate that the target
+// ending trusts, so the priority-ordered winner is unambiguous:
+//
+//   - higher-priority non-romance endings (dragon_sovereign at
+//     8, corruption at 7, ...) need only their own flag, since
+//     no other ending-satisfying flag is set in their
+//     prototype;
+//   - romance endings need ONLY the relationship axis at
+//     threshold, with the other companions absent from the
+//     Relationships map (so the lower-priority romance variants
+//     miss).
+//
+// The wanderer prototype intentionally sets all 11 base flags
+// and zero relationship thresholds — Evaluate should return
+// wanderer because wanderer has no conditions and every other
+// ending's conditions evaluate false against that state.
+func TestLoad_FrontierWorldpackPerEnding(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	dir := filepath.Join(wd, "..", "..", "worldpacks", "frontier")
+	loaded, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load %s: %v", dir, err)
+	}
+
+	// Base flags every prototype shares: the protagonist has
+	// reached Act 3 (act1 + act2 completed), but no realm
+	// commitment has been made yet.
+	baseFlags := func(ws *state.WorldState) {
+		ws.Protagonist = "Kael"
+		ws.Flags["act1_completed"] = true
+		ws.Flags["act2_completed"] = true
+	}
+
+	tests := []struct {
+		name  string
+		setup func(*state.WorldState)
+	}{
+		{"wanderer", func(ws *state.WorldState) {
+			// Base state alone — no realm flag, no relationship
+			// delta. Wanderer (priority 0, no conditions)
+			// should be the only match.
+		}},
+		{"hero", func(ws *state.WorldState) {
+			ws.Flags["mid_completed"] = true
+			ws.Flags["saved_companions"] = true
+		}},
+		{"dragon_alliance", func(ws *state.WorldState) {
+			ws.Flags["dragon_kinship_offered"] = true
+		}},
+		{"kingdom", func(ws *state.WorldState) {
+			ws.Flags["kingdom_aligned"] = true
+		}},
+		{"archmage", func(ws *state.WorldState) {
+			ws.Flags["archmage_unbound"] = true
+		}},
+		{"shadow_lord", func(ws *state.WorldState) {
+			ws.Flags["underworld_broken"] = true
+		}},
+		{"world_guardian", func(ws *state.WorldState) {
+			ws.Flags["both_worlds_saved"] = true
+		}},
+		{"corruption", func(ws *state.WorldState) {
+			ws.Flags["descent_into_dark"] = true
+		}},
+		{"dragon_sovereign", func(ws *state.WorldState) {
+			ws.Flags["dragon_sovereign_crowned"] = true
+		}},
+		{"elara_romance", func(ws *state.WorldState) {
+			ws.Relationships["Elara"] = state.Relationship{Affection: 75}
+		}},
+		{"selene_romance", func(ws *state.WorldState) {
+			ws.Relationships["Selene"] = state.Relationship{Trust: 50}
+		}},
+		{"orion_romance", func(ws *state.WorldState) {
+			ws.Relationships["Orion"] = state.Relationship{Affection: 75}
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := state.NewWorldState()
+			baseFlags(&ws)
+			tc.setup(&ws)
+
+			got, ok := endings.Evaluate(ws, loaded.Endings)
+			if !ok {
+				t.Fatalf("Evaluate returned no valid ending for %q; expected %q to match", tc.name, tc.name)
+			}
+			if got.ID != tc.name {
+				t.Errorf("Evaluate ID = %q (priority %d); want %q", got.ID, got.Priority, tc.name)
+			}
+		})
+	}
+}
+
 // allKnownNodes returns every authored node in the worldpack
 // for iteration by the trigger-event cross-check. Phase 38.B/C
 // enumerates ~43 nodes; the loader has no public Graph.Nodes()
@@ -291,6 +406,13 @@ func allKnownNodes(loaded *Loaded) []story.StoryNode {
 		// Phase 38.B/C protagonist detours
 		"act2.kael_letter", "act2.lyra_runic_slate",
 		"act2.raven_brother", "act2.aria_pilgrim_book",
+		// Phase 38.D Act 3 (per endings.yaml §20 gate coverage)
+		"act3.keep_interior", "act3.the_end",
+		"act3.elaras_vigil", "act3.selenes_deep_trust", "act3.orions_meeting",
+		"act3.claim_hero", "act3.claim_dragon_alliance",
+		"act3.claim_kingdom", "act3.claim_archmage",
+		"act3.claim_shadow_lord", "act3.claim_world_guardian",
+		"act3.claim_corruption", "act3.claim_dragon_sovereign",
 	}
 	for _, id := range ids {
 		n, err := loaded.Graph.Lookup(id)

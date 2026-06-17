@@ -725,11 +725,12 @@ nodes:
       road rises behind the keep and descends into a long
       valley you have not seen before. The person waiting for
       you at the doorway is someone you already know. (Act 3
-      begins here; not authored by Phase 38.B/C.)
+      begins here; this handoff point feeds Phase 38.D's
+      act3.keep_interior.)
     choices:
       - id: "enter_the_keep"
         text: "Enter the keep."
-        next_node_id: "act2.act3_handoff"
+        next_node_id: "act3.keep_interior"
         effects:
           - set_flag: "act2_completed"
 
@@ -878,3 +879,279 @@ nodes:
           - flag: "Aria_Protagonist"
         effects:
           - set_flag: "aria_prayer_complete"
+
+  # ============================================================
+  # SECTION E. Act 3 — The keep's awakening + ending gates
+  # (Phase 38.D)
+  #
+  # The 8 non-romance endings (per ARCHITECTURE.md §20) gate on
+  # distinct realm flags that no earlier Act sets. This section
+  # adds the realm-claim scenes that COMMIT to one ending by
+  # setting the gate flag. The 3 romance variants gate on
+  # relationship.axes ≥ threshold — Act 2 baseline deltas do
+  # not always reach the threshold (Elara affection starts at
+  # zero; Act 2 only stacks Selene to 30 trust; Act 2 only
+  # stacks Orion respect, not affection), so this section
+  # also adds 3 romance-conditioning scenes that bring each
+  # axis to the §20 threshold.
+  #
+  # Acceptance (PHASES.md §38.D): each of the 12 endings'
+  # conditions resolves against a synthetic protagonist-path
+  # WorldState in TestLoad_FrontierWorldpackPerEnding.
+  # ============================================================
+
+  - id: "act3.keep_interior"
+    title: "E1 — Inside the keep of the Old Kings"
+    text: |
+      The relic hums. It has not stopped humming since you
+      crossed under the mural and now, in the half-dark of the
+      keep's interior, it hums at a pitch that makes the bricks
+      answer back. The mural of the coiled serpent covers the
+      dome above you; its open mouth has the colour of a
+      doorway. There is a stone at the centre of the floor and
+      it is older than the keep. There is a path forward.
+    choices:
+      # Romance-conditioning scenes first — each loops back
+      # to the hub so a player who has invested deeply in one
+      # companion line can still reach the realm claim.
+      - id: "stand_watch_with_elara"
+        text: "Stand watch with Elara for an evening."
+        next_node_id: "act3.elaras_vigil"
+        conditions:
+          - flag: "recruited_elara"
+      - id: "let_selene_finish"
+        text: "Let Selene finish her reading."
+        next_node_id: "act3.selenes_deep_trust"
+        conditions:
+          - flag: "selene_read_the_relic"
+      - id: "sit_with_orion"
+        text: "Sit with Orion by the fire."
+        next_node_id: "act3.orions_meeting"
+        conditions:
+          - flag: "orion_oath_taken"
+      # Realm-claim terminals — each choice routes forward
+      # to its dedicated claim scene, which sets the §20
+      # gate flag.
+      - id: "claim_hero_path"
+        text: "Take up the hero's path."
+        next_node_id: "act3.claim_hero"
+      - id: "claim_dragon_kinship"
+        text: "Offer kinship to the void dragon."
+        next_node_id: "act3.claim_dragon_alliance"
+        conditions:
+          - flag: "saw_void_dragon"
+      - id: "claim_kingdoms_throne"
+        text: "Take the kingdom's throne."
+        next_node_id: "act3.claim_kingdom"
+        conditions:
+          - flag: "kingdom_aligned"
+      - id: "claim_unbound_magic"
+        text: "Unbind the magic in your chest."
+        next_node_id: "act3.claim_archmage"
+        conditions:
+          - variable: { key: "MagicAffinity", value: 50 }
+      - id: "claim_shadow_throne"
+        text: "Claim the shadow throne."
+        next_node_id: "act3.claim_shadow_lord"
+      - id: "claim_both_worlds"
+        text: "Step between both worlds."
+        next_node_id: "act3.claim_world_guardian"
+      - id: "claim_dark_descent"
+        text: "Follow the relic into darkness."
+        next_node_id: "act3.claim_corruption"
+      - id: "claim_serpent_crown"
+        text: "Take the serpent's crown upon your head."
+        next_node_id: "act3.claim_dragon_sovereign"
+        conditions:
+          - flag: "relic_claimed"
+
+  - id: "act3.elaras_vigil"
+    title: "E2 — Elara's vigil, by torchlight"
+    text: |
+      The vigil is not a conversation; it is a long evening of
+      walking the keep's ramparts and not talking. Elara knows
+      where the bolts need tightening. She knows the path of
+      the wind across the keep's width. By the time the third
+      torch has burned down to the second floor, you have
+      stopped walking next to each other and started walking
+      with each other, and the name of the difference is not
+      something you will write down.
+    choices:
+      - id: "vigil_until_dawn"
+        text: "Stay until dawn."
+        next_node_id: "act3.keep_interior"
+        effects:
+          - modify_relationship: { character: "Elara", axis: "affection", value: 75 }
+          - set_flag: "elara_vigil_complete"
+
+  - id: "act3.selenes_deep_trust"
+    title: "E3 — Selene, finishing the reading"
+    text: |
+      Selene does not finish the reading. She re-reads two
+      chapters from the relic three times each over a long
+      afternoon, marks one of them with a small grey seal,
+      puts the relic back into your hands, and says the word
+      you have been waiting to hear since the spire: \"Yes.
+      That is what it says.\" You take the relic back. She
+      takes your hand for a moment. Then she lets go.
+    choices:
+      - id: "thank_selene"
+        text: "Thank her."
+        next_node_id: "act3.keep_interior"
+        effects:
+          - modify_relationship: { character: "Selene", axis: "trust", value: 25 }
+          - set_flag: "selene_deep_trust_complete"
+
+  - id: "act3.orions_meeting"
+    title: "E4 — Orion by the fire"
+    text: |
+      The fire is older than the keep. Orion brings his own
+      wood. He has not had a friend who could read the relic
+      since your grandfather's lifetime and the way he asks
+      about it is not the way he asks about the relic. He asks
+      about you. By the time the fire has burned down twice,
+      he has put a small, plain ring on the stone between you
+      and he has not asked a question in a long time.
+    choices:
+      - id: "take_the_ring"
+        text: "Take the ring he has not yet offered you."
+        next_node_id: "act3.keep_interior"
+        effects:
+          - modify_relationship: { character: "Orion", axis: "affection", value: 75 }
+          - set_flag: "orion_meeting_complete"
+
+  - id: "act3.claim_hero"
+    title: "E5 — The hero's claim"
+    text: |
+      The companions gather at the keep's gate. The relic
+      produces no further visions. The path forward has the
+      quality of a path walked once before by people you would
+      have called heroes when you were younger. You walk it
+      with the people walking with you; you do not walk it
+      alone.
+    choices:
+      - id: "walk_with_them"
+        text: "Walk forward with them."
+        next_node_id: "act3.the_end"
+        effects:
+          - set_flag: "mid_completed"
+          - set_flag: "saved_companions"
+
+  - id: "act3.claim_dragon_alliance"
+    title: "E6 — Kinship with the void dragon"
+    text: |
+      The relic hums. The void-serpent you saw on the mural
+      becomes, in the half-dark of the keep, a thing you can
+      see in two places at once — the figure above the dome
+      and the figure that slowly, with no malice, looks at you
+      from across the floor. It does not breathe fire. It
+      asks. You answer.
+    choices:
+      - id: "offer_kinship"
+        text: "Offer kinship."
+        next_node_id: "act3.the_end"
+        effects:
+          - set_flag: "dragon_kinship_offered"
+
+  - id: "act3.claim_kingdom"
+    title: "E7 — The kingdom's throne"
+    text: |
+      The kingdom's crown is older than the relic and lighter
+      than the relic and it fits your head the way Aldric's
+      hand fitted your shoulder three days ago. You have not
+      known that you were meant to wear it until now. The
+      keeper is in the doorway, smiling for the first time
+      since you came into the keep.
+    choices:
+      - id: "wear_the_crown"
+        text: "Wear the crown."
+        next_node_id: "act3.the_end"
+        effects:
+          - set_flag: "kingdom_aligned"
+
+  - id: "act3.claim_archmage"
+    title: "E8 — The unbound magic"
+    text: |
+      The relic's teacher is the relic itself. Your hands
+      remember what they have done. The slate you carried,
+      the rune you inscribed, the chisel you laid down at
+      Ashwick — they are still in your hands, in some
+      register you have not noticed before, and the keep is
+      full of the language they speak.
+    choices:
+      - id: "speak_the_language"
+        text: "Speak the language."
+        next_node_id: "act3.the_end"
+        effects:
+          - set_flag: "archmage_unbound"
+
+  - id: "act3.claim_shadow_lord"
+    title: "E9 — The shadow throne"
+    text: |
+      The underworld breaks through in a small way at first:
+      a draft, a flicker, a candle that goes out for no
+      reason. Then a door opens in the floor that was not
+      there a moment ago. The person on the other side of it
+      offers you the only kind of authority that comes with
+      a price you have already paid.
+    choices:
+      - id: "take_the_throne"
+        text: "Take the throne they offer."
+        next_node_id: "act3.the_end"
+        effects:
+          - set_flag: "underworld_broken"
+
+  - id: "act3.claim_world_guardian"
+    title: "E10 — Between both worlds"
+    text: |
+      There is a place inside the relic where two worlds touch.
+      You have felt it every time the relic changed the
+      weather on the mountain. You have felt it every time
+      Maren wrote the widow's name in the margin. The path
+      forward is the path between. You step into it.
+    choices:
+      - id: "step_between"
+        text: "Step between both worlds."
+        next_node_id: "act3.the_end"
+        effects:
+          - set_flag: "both_worlds_saved"
+
+  - id: "act3.claim_corruption"
+    title: "E11 — The dark descent"
+    text: |
+      The relic's other path is darker. It has been darker
+      since the relic first made the weather change. You
+      have been offered the choice between two thirds of the
+      world and one half of yourself, and you choose the half.
+    choices:
+      - id: "walk_into_the_dark"
+        text: "Walk into the dark."
+        next_node_id: "act3.the_end"
+        effects:
+          - set_flag: "descent_into_dark"
+
+  - id: "act3.claim_dragon_sovereign"
+    title: "E12 — The serpent's crown"
+    text: |
+      The relic itself is a crown. You have been carrying it
+      since Ashwick. You have been tested for it since Greyhall.
+      The crown fits as crowns fit in the stories: with the
+      weight of everyone who wore it before you.
+    choices:
+      - id: "wear_the_serpent"
+        text: "Wear the serpent's crown."
+        next_node_id: "act3.the_end"
+        effects:
+          - set_flag: "dragon_sovereign_crowned"
+
+  - id: "act3.the_end"
+    title: "E13 — The ending"
+    text: |
+      The keep is quiet. The mural, the relic, the companions,
+      the kingdom, the void-serpent, the Old Kings, the
+      language you have been speaking — the ending is the
+      last time any of them will speak to you. You may stop
+      here.
+    choices: []  # Phase 38.D terminal: no choices; runner
+                 # surfaces the highest-priority ending per
+                 # ARCHITECTURE.md §23.
