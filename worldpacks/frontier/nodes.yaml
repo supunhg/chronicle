@@ -994,9 +994,24 @@ nodes:
         text: "A handful of coins lies half-buried underfoot; gather them."
         next_node_id: "act3.the_end"
         conditions:
-          - not: { flag: "rested" }
+          # One-shot: pick_up_coin was structurally always-on because
+          # the worldpack never sets `rested`. Gate on a fresh
+          # `coins_not_yet_picked` flag (set in effects below) so
+          # repeated returns to act3.keep_interior do not bankroll
+          # the player. If a future author repurposes `rested`,
+          # this gate is unaffected.
+          - not: { flag: "coins_not_yet_picked" }
         effects:
           - add_item: { key: "Coin", count: 5 }
+          - set_flag: "coins_not_yet_picked"
+      # WARNING: this choice clears `relic_claimed`, which is ALSO
+      # the gate for `claim_serpent_crown` (-> dragon_sovereign
+      # ending, §20 priority-band specific). A player who picks
+      # `return_relic` first loses access to dragon_sovereign until
+      # `relic_claimed` is re-set elsewhere. §38.E spines do not
+      # include this choice and MUST NOT add it without auditing the
+      # §20 ending-priority matrix; do not author a follow-on
+      # `re-claim_relic` choice without that audit.
       - id: "return_relic"
         text: "Lay the dragon relic back into the vault; the humming stops."
         next_node_id: "act3.the_end"
@@ -1004,6 +1019,14 @@ nodes:
           - flag: "relic_claimed"
         effects:
           - clear_flag: "relic_claimed"
+      # RARE: `has_ending` only resolves Truthy on a SaveGame whose
+      # EndingsUnlocked contains "wanderer". The worldpack has no
+      # mid-playthrough trigger for ending evaluation (endings
+      # resolve at termination per §23): this is the honest §37.B
+      # coverage demonstration of the HasEnding Condition type.
+      # Reachable only via §39 (SaveGame -> Load), not from any
+      # in-playthrough spine. Decision recorded §40.A follow-up #2
+      # (accept-as-rare over mid-playthrough substitution).
       - id: "remember_wanderer"
         text: "Recall the wandering life you once lived; the keep's silence answers back."
         next_node_id: "act3.the_end"
