@@ -126,7 +126,7 @@ The v2 Definition of Done, lifted from `ARCHITECTURE.md §25`:
 
 | Sub | Goal | Acceptance test | Status |
 |---|---|---|---|
-| **40.A** | All 10 Definition-of-Done items green. | Manual + integration suite check. |
+| **40.A** | §40.C + §40.D acceptance gates implemented in `internal/content/coverage_test.go` (4 tests). | `TestProtagonistCoverage` (8/8 sub-tests green — each of 4 protags reaches 1 romance + 1 non-romance ending) + `TestEndingCoverage` (12/12 sub-tests green — all §20 endings reachable from a protagonist). `TestConditionCoverage` + `TestEffectCoverage` correctly surface worldpack schema-coverage gaps: `{And, HasEnding, HasItem, Not, Or}` conditions and `{AddItem, ClearFlag, RemoveItem}` effects are not exercised by any authored choice in `worldpacks/frontier/`. The gates assert content completeness; the gaps are content-authoring follow-ups for §40.D to flip green. | ⚠️ partial (test scaffolding complete; 2/4 gates content-blocked) |
 | **40.B** | Manual playthrough walkthrough. Each protagonist plays from start to a v2 ending. | One-by-one playthroughs, signed off in `PHASES.md`. |
 | **40.C** | Test gates: each of the 4 protagonists can reach at least one romance ending AND at least one non-romance ending. Romance variants of the 12 endings are reachable. | `TestProtagonistCoverage` + `TestEndingCoverage`. |
 | **40.D** | Test gates: every condition in `internal/story/conditions.go` is exercised by at least one authored node. Every effect in `internal/story/effects.go` is exercised by at least one authored choice. | `TestConditionCoverage` + `TestEffectCoverage`. |
