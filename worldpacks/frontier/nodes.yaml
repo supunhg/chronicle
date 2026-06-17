@@ -990,6 +990,7 @@ nodes:
         text: "Stay until dawn."
         next_node_id: "act3.keep_interior"
         effects:
+          # absolute-set, see thank_selene
           - modify_relationship: { character: "Elara", axis: "affection", value: 75 }
           - set_flag: "elara_vigil_complete"
 
@@ -1008,15 +1009,12 @@ nodes:
         text: "Thank her."
         next_node_id: "act3.keep_interior"
         effects:
-          # ModifyRelationship is absolute-set (clamped to [-100,100],
-          # see internal/story/effects.go), NOT additive. Earlier draft
-          # used value: 25 intending "+25 on top of let_selene_read's
-          # +30", which clobbered Selene trust from 30 down to 25,
-          # failing the selene_romance gate (≥50) for all 4 protagonists
-          # in TestAllEndingsReachable. Phase 38.E fix: set the absolute
-          # value at the gate threshold. Same absolute-set pattern as
-          # vigil_until_dawn (Elara affection=75) and take_the_ring
-          # (Orion affection=75).
+          # ModifyRelationship is absolute-set (clamped [-100,100],
+          # internal/story/effects.go), NOT additive. This choice
+          # sets Selene trust = 50 (gate threshold); do not "stack"
+          # on top of let_selene_read's set or the latter is
+          # clobbered. See vigil_until_dawn (Elara=75) and
+          # take_the_ring (Orion=75) for the same pattern.
           - modify_relationship: { character: "Selene", axis: "trust", value: 50 }
           - set_flag: "selene_deep_trust_complete"
 
@@ -1035,6 +1033,7 @@ nodes:
         text: "Take the ring he has not yet offered you."
         next_node_id: "act3.keep_interior"
         effects:
+          # absolute-set, see thank_selene
           - modify_relationship: { character: "Orion", axis: "affection", value: 75 }
           - set_flag: "orion_meeting_complete"
 
