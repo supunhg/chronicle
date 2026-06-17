@@ -23,9 +23,9 @@
 //                      §39.E follow-up #1.
 //   - default        — print roadmap + exit 0.
 //
-// The v1 simulation stack (sqlite persistence, simulation
-// engines, LLM-first narration, intent parser, REPL) is retired
-// per Phase 35.
+// The v1 simulation stack (simulation engines, LLM-first
+// narration, intent parser, REPL, sqlite persistence) is retired
+// per Phase 35 + §39.F.
 package main
 
 import (

@@ -284,7 +284,7 @@ func TestSaveLoad_VersionMismatch_New(t *testing.T) {
 // without complaint. Explicit assertion (on top of the indirect
 // coverage by TestSaveLoadRoundTrip) so a future CurrentVersion
 // bump has a focal point -- flip the constant, this test
-// surfaces the regression in the persistence/CLI layer.
+// surfaces the regression in the JSON SaveGame / save-CLI layer.
 func TestSaveLoad_CurrentVersion_Loads(t *testing.T) {
 	sg := SaveGame{Version: CurrentVersion, WorldState: NewWorldState()}
 	sg.WorldState.CurrentNodeID = "act1.opening"
