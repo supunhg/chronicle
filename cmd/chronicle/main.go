@@ -11,7 +11,7 @@
 //
 //   - `save`         — write a SaveGame JSON to disk. §39.C.
 //   - `resume`       — rehydrate a SaveGame, drop the player at
-//                      CurrentNodeID. (lands in §39.D.)
+//                      CurrentNodeID. §39.D.
 //   - `info / diff`  — read-only inspection of saves. (lands in
 //                      §39.E.)
 //   - default        — print roadmap + exit 0.
@@ -46,6 +46,11 @@ func main() {
 	switch args[0] {
 	case "save":
 		if err := runSave(args[1:], os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+	case "resume":
+		if err := runResume(args[1:], os.Stderr); err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
 			os.Exit(1)
 		}

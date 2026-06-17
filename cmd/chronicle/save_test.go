@@ -254,9 +254,12 @@ func TestSave_WorldHashStableAcrossRuns(t *testing.T) {
 }
 
 // extractWorldHashFromStderr grep-lifts the WorldHash from the
-// "save: WorldHash=<hex>" stderr line. Returns "" if not found.
+// stderr line of any subcommand that emits "<prefix>: WorldHash=<hex>".
+// The hash value is subcommand-agnostic (§18A canonical hash), so
+// `save` ("save: WorldHash=…") and `resume` ("resume: WorldHash=…")
+// both resolve through this helper. Returns "" if not found.
 func extractWorldHashFromStderr(stderr string) string {
-	const prefix = "save: WorldHash="
+	const prefix = "WorldHash="
 	i := strings.Index(stderr, prefix)
 	if i < 0 {
 		return ""
