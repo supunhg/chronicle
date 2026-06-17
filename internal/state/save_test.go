@@ -229,3 +229,81 @@ func TestWorldHash_DistinctForDifferentSaves(t *testing.T) {
 		t.Errorf("different saves must produce different WorldHashes")
 	}
 }
+
+// TestSaveLoad_VersionMismatch_Old verifies that older save
+// versions are refused at load-time per §18A invariant #3
+// (no silent backward migration). The load-side gate's error
+// message must distinguish "older build" from "newer build"
+// so the player can pick a remediation path (downgrade vs
+// upgrade Chronicle).
+func TestSaveLoad_VersionMismatch_Old(t *testing.T) {
+	sg := SaveGame{Version: -1, WorldState: NewWorldState()}
+	data, err := sg.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var loaded SaveGame
+	err = loaded.Unmarshal(data)
+	if err == nil {
+		t.Fatal("expected error for old-version save; got nil")
+	}
+	if !strings.Contains(err.Error(), "older Chronicle build") {
+		t.Errorf("error must mention 'older Chronicle build'; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "no backward migration") {
+		t.Errorf("error must call out the no-migration policy; got: %v", err)
+	}
+}
+
+// TestSaveLoad_VersionMismatch_New verifies that newer save
+// versions are refused at load-time per §18A invariant #3
+// (no forward migration either -- variant save-versions are
+// authoritative per the producing build; the player should
+// update Chronicle). The error must signpost the upgrade path.
+func TestSaveLoad_VersionMismatch_New(t *testing.T) {
+	sg := SaveGame{Version: 1, WorldState: NewWorldState()}
+	data, err := sg.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var loaded SaveGame
+	err = loaded.Unmarshal(data)
+	if err == nil {
+		t.Fatal("expected error for new-version save; got nil")
+	}
+	if !strings.Contains(err.Error(), "newer Chronicle build") {
+		t.Errorf("error must mention 'newer Chronicle build'; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "update Chronicle") {
+		t.Errorf("error must signpost 'update Chronicle' remediation; got: %v", err)
+	}
+}
+
+// TestSaveLoad_CurrentVersion_Loads is the positive control:
+// a SaveGame whose Version equals CurrentVersion round-trips
+// without complaint. Explicit assertion (on top of the indirect
+// coverage by TestSaveLoadRoundTrip) so a future CurrentVersion
+// bump has a focal point -- flip the constant, this test
+// surfaces the regression in the persistence/CLI layer.
+func TestSaveLoad_CurrentVersion_Loads(t *testing.T) {
+	sg := SaveGame{Version: CurrentVersion, WorldState: NewWorldState()}
+	sg.WorldState.CurrentNodeID = "act1.opening"
+	sg.WorldState.Flags["met_elara"] = true
+	data, err := sg.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var loaded SaveGame
+	if err := loaded.Unmarshal(data); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if loaded.Version != CurrentVersion {
+		t.Errorf("Version round-trip: got %d want %d", loaded.Version, CurrentVersion)
+	}
+	if loaded.WorldState.CurrentNodeID != "act1.opening" {
+		t.Errorf("CurrentNodeID round-trip failed: got %q", loaded.WorldState.CurrentNodeID)
+	}
+	if !loaded.WorldState.Flags["met_elara"] {
+		t.Errorf("Flags[met_elara] not preserved across round-trip")
+	}
+}

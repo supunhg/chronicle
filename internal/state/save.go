@@ -21,6 +21,21 @@ type SaveGame struct {
 	WorldState WorldState
 }
 
+// CurrentVersion is the canonical save version shipped by this
+// build of Chronicle. It gates load-time migration per
+// ARCHITECTURE.md §18A invariant #3 ("versioning and migration
+// are explicit; no silent migration"). Unmarshal refuses to
+// load a SaveGame whose Version differs from CurrentVersion —
+// older saves are rejected because there's no forward migration,
+// newer saves are rejected because the player should update
+// Chronicle to load them.
+//
+// Bumping CurrentVersion is the explicit migration checkpoint:
+// old-version saves will refuse to load, the migration code
+// (when authored in a future phase) should run on the rejected
+// SaveGame before the load retry.
+const CurrentVersion = 0
+
 // Marshal encodes a SaveGame using the canonical (§18A invariant #1)
 // sorted-key JSON form. The output is byte-stable:
 //
@@ -66,11 +81,27 @@ func (sg SaveGame) Marshal() ([]byte, error) {
 // catch content tampering, callers compare the post-load WorldHash
 // against a separately-stored pre-save hash (Phase 40.E's
 // TestSaveLoadResilience gate).
+//
+// Per §18A invariant #3, Unmarshal refuses to load a save whose
+// Version differs from CurrentVersion. Specifically:
+//   - sg.Version < CurrentVersion -> "save is from an older build";
+//     no backward migration is supported.
+//   - sg.Version > CurrentVersion -> "save is from a newer build";
+//     update Chronicle to load it.
+// Sided errors (vs. a generic "version mismatch") so the player
+// can act on them — either roll back to the older build or
+// upgrade.
 func (sg *SaveGame) Unmarshal(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(sg); err != nil {
 		return fmt.Errorf("state: unmarshal: %w", err)
+	}
+	if sg.Version < CurrentVersion {
+		return fmt.Errorf("state: unmarshal: this save is from an older Chronicle build (save version=%d, current=%d); no backward migration is supported", sg.Version, CurrentVersion)
+	}
+	if sg.Version > CurrentVersion {
+		return fmt.Errorf("state: unmarshal: this save is from a newer Chronicle build (save version=%d, current=%d); update Chronicle to load it", sg.Version, CurrentVersion)
 	}
 	return nil
 }
