@@ -1,0 +1,27 @@
+# Lyra playthrough script — §40.B manual walkthrough
+continue_to_ashwick
+enter_keep
+speak_to_keeper
+offer_help
+claim_relic
+accept_elara
+head_down_to_mountains
+continue_to_act2
+cross_into_mountains
+open_lyra_slate
+fulfill_the_inscription
+step_outside
+approach_selenes_tower
+approach_selene
+let_selene_read
+study_with_maren
+head_for_aldrics_keep
+accept_aldrics_commission
+head_for_harlans_roadside
+give_harlan_the_letter
+follow_harlans_warning
+head_for_act2_closeup
+continue_to_act3
+enter_the_keep
+claim_hero_path
+walk_with_them

@@ -9,6 +9,7 @@
 // os.Args[1] (no cobra/urfave dependency — stdlib flag is
 // sufficient for the current surface):
 //
+//   - `play`         — start an interactive playthrough. §40.B.
 //   - `save`         — write a SaveGame JSON to disk. §39.C.
 //   - `resume`       — rehydrate a SaveGame, drop the player at
 //                      CurrentNodeID. §39.D. With `--json`,
@@ -52,6 +53,11 @@ func main() {
 		return
 	}
 	switch args[0] {
+	case "play":
+		if err := runPlay(args[1:], os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
 	case "save":
 		if err := runSave(args[1:], os.Stderr); err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
@@ -94,6 +100,7 @@ func main() {
 func printRoadmap(w io.Writer) {		fmt.Fprintf(w, "chronicle v%s\n", version)
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Available v2 CLI subcommands:")
+	fmt.Fprintln(w, "  play       start an interactive playthrough (-protagonist, §40.B)")
 	fmt.Fprintln(w, "  save       write a SaveGame JSON to disk (-out, -from, §39.C)")
 	fmt.Fprintln(w, "  resume     rehydrate a SaveGame from disk; --json (§39.E)")
 	fmt.Fprintln(w, "             emits canonical SaveGame to stdout")
@@ -116,6 +123,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "Usage: chronicle <subcommand> [flags]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Subcommands:")
+	fmt.Fprintln(w, "  play        start an interactive playthrough (-protagonist)")
 	fmt.Fprintln(w, "  save        write a SaveGame JSON to disk (-out, -from)")
 	fmt.Fprintln(w, "  resume      rehydrate a SaveGame from disk; --json emits the")
 	fmt.Fprintln(w, "              canonical SaveGame to stdout for piping")

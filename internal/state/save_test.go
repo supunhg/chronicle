@@ -279,6 +279,64 @@ func TestSaveLoad_VersionMismatch_New(t *testing.T) {
 	}
 }
 
+// TestSaveLoadResilience is the §40.E gate: a table of structurally-
+// malformed saves, each of which must reject load with a clear error.
+// This complements the individual tamper tests above (UnknownField,
+// BadType, BadJSON) by exercising the gaps those did not cover:
+// empty input, truncated JSON, missing required fields, and wrong
+// top-level JSON type.
+func TestSaveLoadResilience(t *testing.T) {
+	cases := []struct {
+		name string
+		give string // raw bytes fed to Unmarshal
+		want string // substring that must appear in the error
+	}{
+		{
+			name: "empty_input",
+			give: "",
+			want: "EOF",
+		},
+		{
+			name: "truncated_json",
+			give: `{"Version":0,"WorldState":{`,
+			want: "unexpected EOF",
+		},
+		{
+			name: "invalid_nested_type",
+			give: `{"Version":0,"WorldState":{"CurrentNodeID":123}}`,
+			want: "CurrentNodeID",
+		},
+		{
+			name: "invalid_map_value_type",
+			give: `{"Version":0,"WorldState":{"Flags":[]}}`,
+			want: "Flags",
+		},
+		{
+			name: "top_level_array",
+			give: `[]`,
+			want: "json: cannot unmarshal array",
+		},
+		{
+			name: "unknown_nested_field",
+			give: `{"Version":0,"WorldState":{"CurrentNodeID":"x","HackerField":true}}`,
+			want: "HackerField",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var loaded SaveGame
+			err := loaded.Unmarshal([]byte(tc.give))
+			if err == nil {
+				t.Fatalf("expected error for %s; got nil", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q; want substring %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
 // TestSaveLoad_CurrentVersion_Loads is the positive control:
 // a SaveGame whose Version equals CurrentVersion round-trips
 // without complaint. Explicit assertion (on top of the indirect
